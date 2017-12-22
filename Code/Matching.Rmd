@@ -1,0 +1,219 @@
+---
+title: "Matching"
+author: "Derrick Yam & Michael Lopez"
+date: "December, 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, eval = FALSE)
+```
+
+## Required libraries
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(readr)
+library(dplyr)
+library(splines)
+library(ggplot2)
+library(RColorBrewer)
+library(Matching)
+set.seed(100)
+```
+
+## Read in data
+
+```{r}
+NFL <- read_csv("Data/NFL_fourthdown_cleaned.csv")
+sample_n(NFL, 1)
+NFL <- mutate(NFL, wp.ave = (wp.Lock + wp.Scrapr)/2)
+```
+
+## Point differential imbalance
+
+```{r}
+pd <- ggplot(NFL, aes(x = ptsdiff)) + 
+  geom_density(position = "identity", alpha = 0.5, aes(fill = as.factor(Attempt.4))) + 
+  scale_fill_brewer(type = "qual", palette = "Dark2") + 
+  ggtitle("Point differential before fourth down plays") + 
+  xlab("Point Differential") + ylab("Density") +
+  theme(legend.position = "none") + 
+  xlim(-40, 35) + 
+  annotate("text", -23, .025, label = "Went for it", colour = "#d95f02", alpha = 1) + 
+  annotate("text", 12, .05, label = "Did not go for it", colour = "#1b9e77", alpha = 1)
+pd
+
+#ggsave(file = "Figures/Point_Differential_Imbalance.png", plot = pd)
+```
+
+
+## Propensity score model
+
+```{r}
+ps.L1 <- glm(Attempt.4 ~ ns(yfog, 10) * ns(ytg, 5) + ns(yfog, 10) * ns(time, 4) + ns(yfog, 10) * pointdiff + 
+               ns(ytg, 5) * ns(time, 4) + ns(ytg, 5) * pointdiff + ns(time, 4)* pointdiff + ns(yfog, 10) +  
+               ns(ytg, 5) + ns(time, 4) + pointdiff + cond.cat + ns(temp, 5) + ns(humd, 5) + ns(wspd, 5) + 
+               ns(sprv,5) + ns(ou, 5) + ns(OR.pass,5) + ns(OR.rush, 5) + ns(DR.pass, 5) + ns(DR.rush,5) + 
+               ns(wk, 4) + Home + ns(wp.ave, 10), data = NFL, family = "binomial")
+
+
+NFL$predict.fitms <- predict(ps.L1, NFL, type = "response")
+
+## Sanity check -- what do PSs look like?
+pmspl <- ggplot(NFL, aes(x = predict.fitms, group = Attempt.4, colour = Attempt.4)) 
+pmspl + geom_histogram(position = "identity") + facet_wrap(~Attempt.4) + scale_y_continuous(lim = c(0, 700))
+```
+
+## Filter for the common support interval
+```{r}
+
+limits <- NFL %>% 
+  filter(coaches.should == "Go for it") %>% 
+  group_by(Attempt.4) %>% 
+  summarise(min.score = min(predict.fitms), max.score = max(predict.fitms))
+
+low.bound <- min(limits$max.score)
+upper.bound <- max(limits$min.score)
+
+NFL.common.support <- NFL %>% 
+  filter(predict.fitms <= low.bound, predict.fitms >= upper.bound)
+
+```
+
+##Recalculate propensity scores  
+
+```{r}
+ps.L2 <- glm(Attempt.4 ~ ns(yfog, 10) * ns(ytg, 5) + ns(yfog, 10) * ns(time, 4) + ns(yfog, 10) * pointdiff + 
+               ns(ytg, 5) * ns(time, 4) + ns(ytg, 5) * pointdiff + ns(time, 4)* pointdiff + ns(yfog, 10) +  
+               ns(ytg, 5) + ns(time, 4) + pointdiff + cond.cat + ns(temp, 5) + ns(humd, 5) + ns(wspd, 5) + 
+               ns(sprv,5) + ns(ou, 5) + ns(OR.pass,5) + ns(OR.rush, 5) + ns(DR.pass, 5) + ns(DR.rush,5) + 
+               ns(wk, 4) + Home + ns(wp.ave, 10), data = NFL.common.support, family = "binomial")
+
+
+NFL.common.support$predict.fitms2 <- predict(ps.L2, NFL.common.support, type = "response")
+
+## Range where teams should go for it
+NFL.gfi <- NFL.common.support %>% 
+  filter(coaches.should == "Go for it")
+
+write.csv(NFL.gfi, "Data/NFL.gfi.csv")
+```
+
+## Match for ATC Random Forest WP Model
+
+```{r}
+NFL.gfi %>% 
+  summarise(mean = mean(seconds), sd = sd(seconds)) %>% 
+  summarise(caliper = 450/sd) #Calculate the caliper size for plays within half of a quarter (450 seconds)
+
+#Create the covariate matching matrix
+psm <- NFL.gfi %>% select(pid, predict.fitms2, wp.ave, ytg, seconds)
+
+
+match.atc  <-   Match(Y = NULL,
+                estimand = "ATC",
+                Tr = as.numeric(NFL.gfi$Attempt.4),
+                M = 1, 
+                ties = FALSE,
+                X = psm[,2:5],
+                calip=c(0.25, 0.25, 0, .432), 
+                replace=T, Weight = 1)
+
+pairs.atc <- cbind(match.atc$index.treated, match.atc$index.control)
+dim(pairs.atc)
+
+## Sample a pair
+NFL.gfi[pairs.atc[7,],]
+
+## treated and control data sets
+treated.atc <- NFL.gfi[match.atc$index.treated,]
+control.atc <- NFL.gfi[match.atc$index.control,]
+
+#Define the paired id which is the row number from NFL.GFI dataset
+treated.atc <- cbind(treated.atc, pairs.atc[,2])
+treated.atc <- treated.atc %>% 
+  rename(paired.id = `pairs.atc[, 2]`)
+
+control.atc <- cbind(control.atc, pairs.atc[,1])
+control.atc <- control.atc %>% 
+  rename(paired.id = `pairs.atc[, 1]`)
+
+#Define the matched pair for the team plot
+control.atc$off.pair <- control.atc$off
+treated.atc$off.pair <- control.atc$off
+
+
+matched.subset.atc <- rbind(control.atc, treated.atc)
+
+write.csv(matched.subset.atc, file = "Data/matched.subset.atc.csv", row.names = FALSE)
+```
+
+```{r}
+#Review of univariate balance
+pd2 <- ggplot(matched.subset.atc, aes(x = ptsdiff)) + 
+  geom_density(position = "identity", alpha = 0.5, aes(fill = as.factor(Attempt.4))) + 
+  scale_fill_brewer(type = "qual", palette = "Dark2") + 
+  ggtitle("Point differential before fourth down plays, after matching") + 
+  xlab("Point Differential") + ylab("Density") +
+  theme(legend.position = "none") + 
+  xlim(-40, 35) + 
+  annotate("text", -23, .025, label = "Went for it", colour = "#d95f02", alpha = 1) + 
+  annotate("text", 12, .05, label = "Did not go for it", colour = "#1b9e77", alpha = 1)
+pd2
+
+#ggsave(file = "Figures/Point_Differential_ATC.png", plot = pd2)
+
+
+```
+
+
+## Love plot for matching effectiveness
+
+```{r}
+## Variables
+vars <- c("yfog", "ytg", "time", "pointdiff", "wspd", "cond.cat", "temp", "humd", "sprv", "ou", "OR.pass", "OR.rush", "DR.pass", "DR.rush", "wk", "wp.ave", "Home")
+
+## Initial data
+NFL.gfi.love <- NFL.gfi[,vars]
+NFL.gfi.love <- data.frame(model.matrix(~., data = NFL.gfi.love)[,-1])
+NFL.gfi.love$Attempt.4 <- NFL.gfi$Attempt.4
+NFL.gfi.gather <- gather(NFL.gfi.love, "variable", "metric", yfog:Home) 
+NFL.gfi.gather <- NFL.gfi.gather %>%  
+  dplyr::select(Attempt.4, variable, metric)
+
+pre.match <- NFL.gfi.gather %>% 
+  group_by(variable) %>%
+  summarise(ave.treatment = sum(metric*Attempt.4)/sum(Attempt.4), 
+            ave.control =   sum(metric*(1-Attempt.4))/sum(1-Attempt.4), 
+            sd.control = sd(metric), 
+            bias = (ave.treatment - ave.control)/sd.control)%>% 
+  mutate(type = "pre-matched")%>% 
+  dplyr::select(variable, bias, type)
+  
+## Matched data
+matched.subset.atc.love <- matched.subset.atc[,vars]
+matched.subset.atc.love <- data.frame(model.matrix(~., data = matched.subset.atc.love)[,-1])
+matched.subset.atc.love$Attempt.4 <- matched.subset.atc$Attempt.4
+matched.subset.atc.gather <- gather(matched.subset.atc.love, "variable", "metric", yfog:Home) 
+matched.subset.atc.gather <- matched.subset.atc.gather %>%  
+  dplyr::select(Attempt.4, variable, metric)
+
+post.match <- matched.subset.atc.gather %>% 
+  group_by(variable) %>%
+  summarise(ave.treatment = sum(metric*Attempt.4)/sum(Attempt.4), 
+            ave.control =   sum(metric*(1-Attempt.4))/sum(1-Attempt.4), 
+            sd.control = sd(metric), 
+            bias = (ave.treatment - ave.control)/sd.control) %>% 
+  mutate(type = "post-matched") %>% 
+  dplyr::select(variable, bias, type)
+
+love.plot <- bind_rows(pre.match, post.match)
+love.plot$variable <- as.character(love.plot$variable)
+love.plot$variable <- factor(love.plot$variable, levels = sort(unique(love.plot$variable), decreasing = TRUE))
+love <- love.plot %>% 
+  ggplot(aes(variable, bias, shape = type)) + geom_point() + coord_flip() +
+    scale_shape_manual(values = c(16, 21), "Source")
+love
+ggsave(file = "Figures/Love_Plot_ATC.png", plot = love)
+

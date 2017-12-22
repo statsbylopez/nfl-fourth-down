@@ -1,0 +1,541 @@
+---
+title: "Data Wrangling"
+author: "Derrick Yam & Michael Lopez"
+date: "December, 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, eval = FALSE)
+```
+
+## Required libraries
+
+```{r}
+library(readr)
+library(dplyr) 
+library(splines)
+library(ggplot2)
+library(broom)
+library(xtable)
+```
+
+
+##Matched Data 
+```{r, include = FALSE}
+games <- read_csv("Data/GAME.csv")
+matched.subset.atc <- read_csv("Data/matched.subset.atc.csv")
+## outcome variable 
+matched.subset.atc <- matched.subset.atc %>% 
+  mutate(deltawp.off.ave = (deltawp.off.Lock + deltawp.off.Scrapr)/2)
+matched.subset.atc$pair.id <- rep(1:(nrow(matched.subset.atc)/2), 2)
+```
+
+##Find an individual pair for paper
+
+```{r}
+matched.subset.atc %>% filter(pid == 596302)
+```
+
+
+## Overall average changes in WP
+
+```{r}
+sum.matched <- matched.subset.atc %>% 
+  group_by(Attempt.4) %>% 
+  summarise(mean.delta = mean(deltawp.off.ave), med.delta = median(deltawp.off.ave), n.plays = n())
+sum.matched
+```
+
+## Wilcoxon Rank Sum Test ATC
+```{r}
+wilcox.test(deltawp.off.ave ~ Attempt.4, matched.subset.atc)
+```
+
+## Density Curve ATC Overall 
+```{r}
+#Lock Results
+pd <- ggplot(matched.subset.atc, aes(x = deltawp.off.ave)) + 
+  geom_density(position = "identity", alpha = 0.5, aes(fill = as.factor(Attempt.4))) + 
+  scale_fill_brewer(type = "qual", palette = "Dark2") + 
+  ggtitle("Change in win probability after fourth down play") + 
+  xlab("Change in win probability") + ylab("Density") +
+  theme(legend.position = "none") + 
+  xlim(-.25, .25) + 
+  annotate("text", -.13, 4, label = "Went for it", colour = "#d95f02", alpha = 1) + 
+  annotate("text", .07, 15, label = "Did not go for it", colour = "#1b9e77", alpha = 1) 
+  
+pd
+
+ggsave(file = "Figures/Results_Density_Curve_ave_wp.png", plot = pd)
+```
+
+## Bootstrap for wins added per team 
+
+Done for each of the Lock win probability model and the nflscrapR win probability model
+
+```{r}
+set.seed(1)
+
+#Lock WP Results
+teams.b <- sort(unique(matched.subset.atc$off))
+df.out.lock <- data.frame(nrow = 32, ncol = 5, NA)
+
+for (j in 1:length(teams.b)) {
+
+df0.b <- matched.subset.atc %>% 
+  filter(off == teams.b[j], Attempt.4 == 0) %>% 
+  select(off, wp.Lock, predict.fitms2, deltawp.off.Lock, pair.id)
+#The pair is the original row number from the data set we matched from
+df1.b <- matched.subset.atc %>% 
+  filter(Attempt.4 == 1, pair.id %in% df0.b$pair.id) %>% 
+  select(off, wp.Lock, predict.fitms2, deltawp.off.Lock)
+
+paired.diff.b <- df1.b$deltawp.off.Lock - df0.b$deltawp.off.Lock
+         
+ 
+B <- 10^4
+boot.diffwp <- numeric(B)
+n.team.b <- length(paired.diff.b)
+diffwp.sum.b <- NULL
+for (i in 1:B)
+  {
+  x.matches.b<-sample(paired.diff.b, n.team.b, replace=T)
+  diffwp.sum.b[i] <- sum(x.matches.b)
+ }
+
+ci.b <- quantile(diffwp.sum.b, c(0.025, 0.5, 0.975), na.rm = TRUE)
+
+print(paste(teams.b[j], ci.b[1], ci.b[3]), quote = FALSE)
+lower.bound.b <- ci.b[1]
+upper.bound.b <- ci.b[3]
+med.b <- ci.b[2]
+
+
+df.out.lock[j,1] <- teams.b[j]
+df.out.lock[j,2] <- lower.bound.b
+df.out.lock[j,3] <- med.b
+df.out.lock[j,4] <- upper.bound.b
+df.out.lock[j,5] <- n.team.b
+}
+
+colnames(df.out.lock) <- c("team", "lower.bound", "med", "upper.bound", "n.team")
+
+df.out.lock %>% 
+  summarise(mean = mean(med), max = max(med), min = min(med))
+
+
+#Scrapr WP Results
+teams.b <- sort(unique(matched.subset.atc$off))
+df.out.scrapr <- data.frame(nrow = 32, ncol = 5, NA)
+
+for (j in 1:length(teams.b)) {
+
+df0.b <- matched.subset.atc %>% 
+  filter(off == teams.b[j], Attempt.4 == 0) %>% 
+  select(off, wp.Scrapr, predict.fitms2, deltawp.off.Scrapr, pair.id)
+#The pair is the original row number from the data set we matched from
+df1.b <- matched.subset.atc %>% 
+  filter(Attempt.4 == 1, pair.id %in% df0.b$pair.id) %>% 
+  select(off, wp.Scrapr, predict.fitms2, deltawp.off.Scrapr)
+
+paired.diff.b <- df1.b$deltawp.off.Scrapr - df0.b$deltawp.off.Scrapr
+         
+ 
+B <- 10^4
+boot.diffwp <- numeric(B)
+n.team.b <- length(paired.diff.b)
+diffwp.sum.b <- NULL
+for (i in 1:B)
+  {
+  x.matches.b<-sample(paired.diff.b, n.team.b, replace=T)
+  diffwp.sum.b[i] <- sum(x.matches.b)
+ }
+
+ci.b <- quantile(diffwp.sum.b, c(0.025, 0.5, 0.975), na.rm = TRUE)
+
+print(paste(teams.b[j], ci.b[1], ci.b[3]), quote = FALSE)
+lower.bound.b <- ci.b[1]
+upper.bound.b <- ci.b[3]
+med.b <- ci.b[2]
+
+
+df.out.scrapr[j,1] <- teams.b[j]
+df.out.scrapr[j,2] <- lower.bound.b
+df.out.scrapr[j,3] <- med.b
+df.out.scrapr[j,4] <- upper.bound.b
+df.out.scrapr[j,5] <- n.team.b
+}
+
+colnames(df.out.scrapr) <- c("team", "lower.bound", "med", "upper.bound", "n.team")
+
+df.out.scrapr %>% 
+  summarise(mean = mean(med), max = max(med), min = min(med))
+
+
+
+df.out.lock$type <- "Lock"
+df.out.scrapr$type <- "ScrapR"
+df.all <- bind_rows(df.out.lock, df.out.scrapr)
+df.all %>% head()
+
+df.all.ave <- df.all %>% group_by(team) %>% summarise(med.both = mean(med))
+df.all <- df.all %>% left_join(df.all.ave) %>% arrange(med.both)
+df.all$team.fact <- rep(1:32, each = 2) + rep(c(.1, -.1), 32)
+
+df.all.ave <- df.all %>% group_by(team) %>% summarise(med.both = mean(med))
+df.all.ave$type <- "Mean"
+df.all.ave <- df.all.ave %>% arrange(med.both)
+df.all.ave$team.fact <- rep(1:32)
+
+LvSplot <- ggplot(df.all, aes(team.fact, med, colour = type)) + 
+  geom_point() + 
+  geom_hline(yintercept = 0, lty = 2, col = "red") +  
+  geom_errorbar(aes(ymin = (lower.bound), 
+                    ymax = (upper.bound))) + 
+  geom_point(data = df.all.ave, aes(x= team.fact, y = med.both, colour = "Average")) +
+  scale_x_continuous(name = "Franchise",
+                   breaks = 1:32, 
+                   labels = unique(df.all$team)) + 
+  scale_y_continuous(name = "Wins Added") + 
+  coord_flip()
+
+LvSplot + 
+  theme_bw(10) + 
+  scale_colour_manual(name = "Win Probability",
+                      values = c("red", "black", "grey66"), breaks = c("Lock", "Average", "ScrapR")) + 
+  ggtitle("Estimated Number of Wins Added from 2004 to 2016") +
+  theme(legend.position = c(.85, .15))
+
+
+ggsave(file = "Figures/Results_Scaled.png", dpi = 600, width = 5.5, height = 7, units = "in")
+
+df.all.ave %>% 
+  summarise(mean = mean(med.both), max = max(med.both), min = min(med.both))
+
+```
+
+## Average Delta WP Results
+
+```{r}
+set.seed(1)
+
+teams.b <- sort(unique(matched.subset.atc$off))
+df.out.ave <- data.frame(nrow = 32, ncol = 5, NA)
+
+for (j in 1:length(teams.b)) {
+
+df0.b <- matched.subset.atc %>% 
+  filter(off == teams.b[j], Attempt.4 == 0) %>% 
+  select(off, wp.ave, predict.fitms2, deltawp.off.ave, pair.id)
+#The pair is the original row number from the data set we matched from
+df1.b <- matched.subset.atc %>% 
+  filter(Attempt.4 == 1, pair.id %in% df0.b$pair.id) %>% 
+  select(off, wp.ave, predict.fitms2, deltawp.off.ave)
+
+paired.diff.b <- df1.b$deltawp.off.ave - df0.b$deltawp.off.ave
+         
+ 
+B <- 10^4
+boot.diffwp <- numeric(B)
+n.team.b <- length(paired.diff.b)
+diffwp.sum.b <- NULL
+for (i in 1:B)
+  {
+  x.matches.b<-sample(paired.diff.b, n.team.b, replace=T)
+  diffwp.sum.b[i] <- sum(x.matches.b)
+ }
+
+ci.b <- quantile(diffwp.sum.b, c(0.025, 0.5, 0.975), na.rm = TRUE)
+
+print(paste(teams.b[j], ci.b[1],  ci.b[2], ci.b[3]), quote = FALSE)
+lower.bound.b <- ci.b[1]
+upper.bound.b <- ci.b[3]
+med.b <- ci.b[2]
+
+
+df.out.ave[j,1] <- teams.b[j]
+df.out.ave[j,2] <- lower.bound.b
+df.out.ave[j,3] <- med.b
+df.out.ave[j,4] <- upper.bound.b
+df.out.ave[j,5] <- n.team.b
+}
+
+colnames(df.out.ave) <- c("team", "lower.bound", "med", "upper.bound", "n.team")
+
+df.out.ave %>% 
+  summarise(mean = mean(med), max = max(med), min = min(med))
+
+```
+
+## Bootstrap for Joy Division plot 
+
+```{r}
+set.seed(0)
+teams <- sort(unique(matched.subset.atc$off))
+df.out <- NULL
+
+for (j in 1:length(teams.b)) {
+
+df0.b <- matched.subset.atc %>% 
+  filter(off == teams.b[j], Attempt.4 == 0) %>% 
+  select(off, wp.ave, predict.fitms2, deltawp.off.ave, pair.id)
+#The pair is the original row number from the data set we matched from
+df1.b <- matched.subset.atc %>% 
+  filter(Attempt.4 == 1, pair.id %in% df0.b$pair.id) %>% 
+  select(off, wp.ave, predict.fitms2, deltawp.off.ave)
+
+paired.diff <- df1.b$deltawp.off.ave - df0.b$deltawp.off.ave
+  
+#Individidual bootstraps per team  
+  B <- 10^4
+  boot.diffwp <- numeric(B)
+  n.team <- length(paired.diff)
+  diffwp.sum <- NULL
+  for (i in 1:B)
+  {
+    x.matches<-sample(paired.diff, n.team, replace=T)
+    diffwp.sum[i] <- sum(x.matches)
+  }
+  
+  df.out.temp <- data.frame(diffwp.sum, team = teams[j])
+  df.out <- bind_rows(df.out, df.out.temp)
+}
+head(df.out)
+
+df <- df.out %>% 
+  mutate(GroupNum = rev(as.numeric(as.factor(team)))) %>% #rev() means the ordering will be from top to bottom
+  group_by(team, GroupNum) %>% 
+  do(tidy(density(.$diffwp.sum, bw = diff(range(.$diffwp.sum))/20))) %>% #The original has quite a large bandwidth
+  group_by() %>% 
+  filter(x > -4, x < 12) %>% #DRY: Range for estimated wins added?
+  mutate(ymin = GroupNum * (max(y) / 1.5), #This constant controls how much overlap between groups there is
+         ymax = y + ymin,
+         ylabel = ymin + min(ymin)/2,
+         xlabel = min(x) - mean(range(x))/5) #This constant controls how far to the left the labels are
+
+#df.out$team<-factor(df.out$team,levels = df.out$team[order(df.out$median)])  
+
+#Get quartiles
+labels <- df.out %>% 
+  mutate(GroupNum = rev(as.numeric(as.factor(team)))) %>%  #GroupNum in order to look through the teams #I think here when we make a groupnumber we should make a group number based off the median rank to put the joy division plot interms of most wins added
+  group_by(team, GroupNum) %>% 
+  mutate(q1 = quantile(diffwp.sum)[2],
+         median = quantile(diffwp.sum)[3],
+         q3 = quantile(diffwp.sum)[4]) %>%
+  filter(row_number() == 1) %>% 
+  dplyr::select(-diffwp.sum) %>% 
+  left_join(df) %>% 
+  mutate(xmed = x[which.min(abs(x - median))],
+         yminmed = ymin[which.min(abs(x - median))],
+         ymaxmed = ymax[which.min(abs(x - median))]) %>% 
+  filter(row_number() == 1)
+
+
+#df.out$team<-factor(df.out$team,levels = df.out$team[order(df.out$median)])  
+
+
+p <- ggplot(df, aes(x, ymin = ymin, ymax = ymax)) + 
+  geom_text(data = labels, aes(xlabel, ylabel, label = team)) +
+  geom_vline(xintercept = 0, size = 1.5, alpha = 0.5, colour = "#626262") + 
+  geom_vline(xintercept = c(-2, -1, 0, 1, 2, 3, 4, 5, 6, 7, 8), 
+             size = 0.75, alpha = 0.25, colour = "#626262") + 
+  theme(panel.grid = element_blank(),
+        panel.background = element_rect(fill = "#F0F0F0"),
+        axis.text.y = element_blank(),
+        axis.text.x =element_text(size=15),
+        axis.ticks = element_blank(),
+        axis.title = element_blank()) 
+
+
+
+#Loop to create each density curve
+for (i in unique(df$GroupNum)) {
+  p <- p + geom_ribbon(data = df[df$GroupNum == i,],
+                       aes(group = GroupNum), #group = median rank
+                       colour = "#F0F0F0", fill = "black") +
+    geom_segment(data = labels[labels$GroupNum == i,],
+                 aes(x = xmed, xend = xmed, y = yminmed, yend = ymaxmed),
+                 colour = "#F0F0F0", linetype = "dashed") +
+    geom_segment(data = labels[labels$GroupNum == i,],
+                 x = min(df$x), xend = max(df$x),
+                 aes(y = ymin, yend = ymin), size = 1, lineend = "round") 
+}
+
+
+#Adding labels to the density curves.
+p <- p + geom_text(data = labels[labels$team == "ARI",], aes(xmed - xlabel/50, ylabel), 
+                   label = "Median", colour = "#F0F0F0", hjust = 0, fontface = "italic", size = 3.5)  
+joy.plot <- p + ggtitle("Estimated Number of Wins Added from 2004 to 2016") + xlab("Number of Wins")
+joy.plot
+
+ggsave(joy.plot, file = "Figures/Joy_Division_ave_wp.png", height = 8.35, width = 6.8)
+
+```
+
+## Extra plots looking at team level traits
+
+```{r}
+## Initial fourth down data
+NFL.gfi <- read_csv("Data/NFL.gfi.csv")
+
+df.team <- NFL.gfi %>% 
+  group_by(off) %>% 
+  summarise(gfi.rate = mean(Attempt.4), gfi.n = n()) %>% 
+  left_join(df.all.ave, by = c("off" = "team")) %>% 
+  dplyr::select(-type, -team.fact) %>% 
+  rename(Team = off, wins.added = med.both)
+
+head(df.team)
+
+#Export Table to Latex
+print(xtable(df.team), include.rownames=FALSE) #prints the table for latex in the console
+
+
+
+```
+
+##Wins added vs. the number of controls
+```{r}
+winsvc <- ggplot(df.team, aes(x = gfi.n, y = wins.added)) +
+  geom_text(aes(label = Team)) + 
+  geom_smooth(method='lm',formula=y~x -1) +
+  scale_y_continuous("Estimated number of wins added from 2004-2016",
+                     breaks = round(dataframe$med.both, 0),
+                     labels = round(dataframe$med.both, 0),
+                     minor_breaks = NULL) +
+   ggtitle("Estimated Wins Added vs Proportion of Fourth Down's Attempted")
+
+winsvc
+
+wvc.lm <- lm(med.both ~ n.c - 1, data = dataframe)
+summary(wvc.lm)
+```
+
+##Wins Added vs. Win Percentage
+```{r}
+wins.road <- games %>% 
+  filter(seas > 2003) %>%
+  filter(wk < 18) %>%
+  group_by(v) %>%
+  summarise(win.road = sum(ptsv > ptsh))
+
+wins.home <- games %>%
+  filter(seas > 2003) %>%
+  filter(wk < 18) %>%
+  group_by(h) %>%
+  summarise(win.home = sum(ptsv < ptsh))
+
+df.wins <- data.frame(wins.road$v, wins.road$win.road, wins.home$win.home)
+
+df.wins <- df.wins %>%
+  rename(team = wins.road.v) %>% 
+  mutate(wins = wins.road.win.road + wins.home.win.home) %>% 
+  dplyr::select(team, wins)
+
+
+wvwp.df2 <- left_join(df.all.ave, df.wins)
+head(wvwp.df2)
+
+wvwp2 <- ggplot(wvwp.df2, aes(x=wins, y = med.both))
+
+wvwp2 + geom_point() + 
+  geom_smooth(method='lm',formula=y~x) +
+  scale_y_continuous("Estimated number of wins added",
+                     breaks = round(wvwp.df2$med.both, 0),
+                     labels = round(wvwp.df2$med.both, 0),
+                     minor_breaks = NULL) +
+   ggtitle("Estimated Wins Added (Lock) vs Total Wins ")
+
+
+agg.proxy <- ATC.f.wp %>% 
+  filter(Attempt.4 == 0) %>% 
+  group_by(off) %>%
+  summarise(n.att = n(), sum.prob = sum(ps.L))
+
+df.temp <- agg.proxy %>% rename(team = off) %>% left_join(df.all.ave)
+ggplot(df.temp, aes(sum.prob, med.both, size = n.att))  +geom_point()
+
+ggplot(ATC.f.wp, aes(3601-seconds, deltawp.off.Lock, colour = Attempt.4))+ geom_point() + geom_smooth() 
+```
+
+#Proportion attempted per season
+```{r}
+##Do we want the proportion of fourth downs attempted within our range or the proportion overall? Either way the scatter plot does not show a trend, but the proportions are different (~25% in range, ~14% overall). It makes it more universal and impartial to our study to do everything. But we refine our arguments, and deal with some confounding by showing our range.
+
+NFL2 <- read_csv("NFLfourthdownCombined.csv")
+
+temp.t  <- NFL2 %>% 
+  filter(Attempt.4 ==1) %>% 
+  group_by(seas) %>% 
+  summarise( n.t = n())
+
+#coaches.should == "Go for it", 
+temp.c  <- NFL2 %>% 
+  filter(Attempt.4 ==0) %>% 
+  group_by(seas) %>% 
+  summarise( n.c = n())
+  
+temp <- left_join(temp.t, temp.c)
+
+temp <- temp %>%  mutate(propatt = n.t/(n.t+n.c))
+
+propatt.scat <- ggplot(temp, aes(seas, propatt))
+propatt.scat + geom_point() + 
+  xlab("Season") + 
+  ylab("") + 
+  ggtitle("Proportion of Fourth Downs Attempted per Season") + 
+  theme_bw(16) + 
+  theme(plot.title = element_text(hjust = 0.5))
+
+
+```
+
+#Number of "Go for it" situations per game
+```{r}
+NFL.total <- read_csv("NFLfourthdownCombined.csv")
+temp2 <- NFL.total %>% 
+  filter(coaches.should == "Go for it") %>% 
+  group_by(gid) %>% 
+  count() %>% 
+  group_by(n) %>% 
+  count()
+
+##We need to make sure that games with no observations have a 0 value instead of nothing.
+totalgames <- length(unique(NFL.total$gid)) # Total number of games
+
+temp.games <- NFL.total %>% 
+  filter(coaches.should == "Go for it") %>% 
+  group_by(gid) %>% 
+  count() 
+
+gameswithplays <- length(unique(temp.games$gid))
+
+totalgames - gameswithplays
+##42 games without a play in this range
+g.without <- c(0, 42)
+
+new.df<- rbind(temp2, g.without)
+
+#recalculate median
+median(rep(new.df$n, new.df$nn))
+
+#proportion of games 
+new.df <- new.df %>% 
+  arrange(n)
+
+new.df %>% 
+  summarise(sumtot = sum(nn))
+
+new.df %>% 
+  filter(n<= 4) %>% 
+  summarize(tot2less = (sum(nn))) 
+  
+
+G <- ggplot(new.df, aes(x = n, y = nn))
+
+G + geom_bar(stat = "identity")
+```
+
+
+

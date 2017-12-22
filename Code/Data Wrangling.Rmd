@@ -1,0 +1,440 @@
+---
+title: "Data Wrangling"
+author: "Derrick Yam & Michael Lopez"
+date: "December, 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, eval = FALSE)
+```
+
+## Required libraries
+
+```{r}
+library(readr)
+library(dplyr) 
+library(splines)
+library(ggplot2)
+library(randomForest)
+library(mgcv)
+```
+
+## Read in data
+
+*Note*: `plays` and `games` data from Armchair Analysis, while `ratingswinprob` from Football Outsiders
+
+```{r}
+plays <- read_csv("Data/PLAY.csv")
+games <- read_csv("Data/GAME.csv")
+ratingswinprob <- read.csv("Data/ratings.csv", stringsAsFactors = FALSE)
+
+plays[plays$off == "LA",]$off <- "STL"
+plays[plays$def == "LA",]$def <- "STL"
+games[games$h == "LA",]$h <- "STL"
+games[games$v == "LA",]$v <- "STL"
+```
+
+## Data cleaning
+
+Steps include
+
+- create new variables
+- filter to regular season games, quarters 1-4, from 2004 onwards
+
+```{r}
+#Armchair note: swap offense and Defense when a team punts.
+plays.new <- plays %>%
+  mutate(team.temp = off,
+         off = ifelse(dwn == 4 & type == "PUNT", def, off),
+         def = ifelse(dwn == 4 & type == "PUNT", team.temp, def)) %>% 
+  mutate(points.temp = ptso,
+         ptso = ifelse(dwn == 4 & type == "PUNT", ptsd, ptso),
+         ptsd = ifelse(dwn == 4 & type == "PUNT", points.temp, ptsd)) %>% 
+  mutate(ptsdiff = ptso-ptsd,
+         seconds = 15*60*(4-qtr) + (60*min) + sec,
+         score.lev = ptsdiff/sqrt(seconds + 1),
+         totalpoints = ptso + ptsd) 
+
+#Join with variables from the game data file
+NFLwin <- left_join(plays.new, games)
+
+#Create a win variable for the win probability models
+NFLwin <- NFLwin %>% 
+  mutate(Home = ifelse(off == h, 1, 0),
+         won.home = ifelse(ptsh > ptsv, 1, 0),
+         won.off = ifelse(Home == 1 & won.home == 1 |
+                          Home == 0 & won.home == 0, 1, 0))
+
+#Filter out observations we will not use in our win probability model or analyses.
+NFLwin <- NFLwin %>% 
+  filter(qtr <5) %>% 
+  filter(seas > 2003) %>% 
+  filter(type != "NOPL") %>% 
+  filter(wk < 18)
+
+#Clean ratings data
+names(ratingswinprob)[1] <- "off"
+names(ratingswinprob)[4] <- "seas"
+names(ratingswinprob)[5] <- "def"
+
+ratings.off <- dplyr::select(ratingswinprob, 1:4)
+ratings.def <- dplyr::select(ratingswinprob, 4:7)
+
+#Merge ratings with NFL data
+NFLwin <- NFLwin %>%
+  left_join(ratings.off) %>%
+  left_join(ratings.def)
+
+NFLwin$won.home <- as.numeric(NFLwin$won.home)
+NFLwin$won.off <- as.numeric(NFLwin$won.off)
+
+##Impute Missing Data for weather conditions in Dome games
+NFLwin[is.na(NFLwin$wspd),]$wspd<-0
+NFLwin[is.na(NFLwin$humd),]$humd<-60
+NFLwin[is.na(NFLwin$temp),]$temp<-70
+```
+
+## Construct win probability model framework 
+
+Create training and test data frames
+
+```{r}
+#Set seed for random samples and random forests
+set.seed(1)
+
+#Define the games to be in the test data set
+games.test <- games %>%
+  filter(wk < 18) %>%
+  group_by(seas, wk) %>%
+  sample_n(2, replace = FALSE)
+
+#Define the test data set for the rf win probability model
+NFLwin.test <- NFLwin %>% 
+  filter(gid %in% games.test$gid)
+
+##Training data set
+NFLwin.train <- NFLwin %>% 
+  filter(!gid %in% games.test$gid)
+
+#Check the dimensions to make sure we didn't lose any observations
+dim(NFLwin)
+dim(NFLwin.test)
+dim(NFLwin.train)
+
+# Strip the training dataset of extra variables
+NFLwin.train <- NFLwin.train %>% 
+   select(won.off, sprv , ptsdiff , seconds , score.lev , totalpoints,
+                yfog , dwn , ytg , timo , timd)
+
+str(NFLwin.train)
+
+##Omit Observations with missing Values
+
+NFLwin.train <- na.omit(NFLwin.train)
+str(NFLwin.train) 
+#Note: won.off needs to be an integer for the randomForest to run properly 
+```
+
+## Random Forest Win Probability Model
+
+Implement random forest win probability model of Lock and Nettleton (JQAS, 2014)
+
+```{r}
+NFLwinprob.Lock.reg = get(load("Models/winprob_lock_rf.RData"))
+
+print(NFLwinprob.Lock.reg)
+NFLwinprob.Lock.reg$importance #Show variable importance
+
+
+##Probability of winning
+NFLwin.test$wp.Lock <- predict(NFLwinprob.Lock.reg, NFLwin.test)
+
+##Probability split into categories
+NFLwin.test$predict.cat <- cut(NFLwin.test$wp.Lock, 20)
+
+##Compare those win probability categories with the true mean outcomes within that group.
+NFLwin.test <- mutate(NFLwin.test, won.off = as.numeric(as.character(won.off)))
+
+##Create a data frame to plot calibration
+agg.Lock.reg <- NFLwin.test %>%
+  group_by(predict.cat) %>%
+  summarize(mean.win = mean(won.off), n.game = n()) %>%
+  rename(predict.cat = predict.cat) %>% 
+  mutate(category = seq(1:20))
+
+estWP <- 0:19/20 + 0.025
+WPaccuracy <- cbind(agg.Lock.reg[1:20,], estWP)
+
+#View calibration
+p.Lock <- ggplot(agg.Lock.reg, aes(predict.cat, mean.win))
+p.Lock + geom_point() + 
+  geom_abline(intercept = -0.025, slope = 1/20) + 
+  scale_x_discrete(name = "Estimated Win Probability",
+                   breaks=c("(0.000106,0.051]", "(0.201,0.251]","(0.45,0.5]","(0.7,0.75]", "(0.95,1]"), 
+                   labels=c("0.00", "0.25",".5",".75", "1.00")) + 
+  ylab("Proportion of Games Won") + 
+  ggtitle("Accuracy of the Lock win probability model") + 
+  theme_bw() + 
+  theme(legend.position = "none")
+
+#Predict win probability for all plays after we confirmed the accuracy on the test data set
+NFLwin$wp.Lock <- predict(NFLwinprob.Lock.reg, NFLwin)
+
+# Apply outcomes from random forest model to observations
+
+#Define the home team's win probability, since the RF gives the offensive wp
+NFLwin <- NFLwin %>% 
+  mutate(wp.home.Lock = ifelse(Home == 1, wp.Lock,  1 - wp.Lock))
+
+#Calculate the change in win probability from each play for the home team
+NFLwin <- NFLwin %>% 
+  group_by(gid) %>% 
+  mutate(wp.home.lead.Lock = lead(as.numeric(wp.home.Lock), 1)) %>% 
+  mutate(deltawp.home.Lock = wp.home.lead.Lock - wp.home.Lock) 
+
+#Calculate the change in win probability from each play for the offensive team
+NFLwin <- NFLwin %>% 
+  mutate(wp.off.lead.Lock = ifelse(Home == 1, wp.home.lead.Lock, 1 - wp.home.lead.Lock)) %>% 
+  mutate(deltawp.off.Lock = wp.off.lead.Lock - wp.Lock)
+```
+
+
+
+## Generalized Additive Win Probability Model
+
+Implement version of generalized additive model used by Horowitz et al with `nflscrapr` package in R
+
+```{r}
+NFLwinprob.Horowitz.reg = get(load("Models/winprob_horowitz_gam.RData"))
+
+# Run the prediction function on our Test data frame
+NFLwin.test$wp.Scrapr <- predict.gam(NFLwinprob.Horowitz.reg, NFLwin.test, type = "response")
+
+##Probability split into categories
+NFLwin.test$predict.cat.NFLS <- cut(NFLwin.test$wp.Scrapr, breaks = 0:20/20)
+
+agg.NFLS.reg <- NFLwin.test %>%
+  group_by(predict.cat.NFLS) %>%
+  summarize(mean.win.s = mean(won.off), n.game.s = n()) %>%
+  rename(predict.cat.NFLS = predict.cat.NFLS) %>% 
+  mutate(category = seq(1:20))
+
+estWP <- 0:19/20 + 0.025
+WPaccuracy <- cbind(agg.NFLS.reg[1:20,], estWP)
+
+p.NFLS <- ggplot(agg.NFLS.reg, aes(predict.cat.NFLS, mean.win.s))
+p.NFLS + geom_point() + 
+  geom_abline(intercept = -0.025, slope = 1/20) + 
+  scale_x_discrete(name = "Estimated Win Probability",
+                   breaks=c("(0.000106,0.051]", "(0.201,0.251]","(0.45,0.5]","(0.7,0.75]", "(0.95,1]"), 
+                   labels=c("0.00", "0.25",".5",".75", "1.00")) + 
+  ylab("Proportion of Games Won") + 
+  ggtitle("Accuracy of the Scrapr win probability model") + 
+  theme_bw() + 
+  theme(legend.position = "none")
+
+
+## NFLscrapr Applying Outcomes to Observations
+
+NFLwin$wp.Scrapr <- predict.gam(NFLwinprob.Horowitz.reg, NFLwin, type = "response")
+
+NFLwin <- mutate(NFLwin,  wp.home.Scrapr = ifelse(Home == 1, wp.Scrapr,  1 - wp.Scrapr))
+
+NFLwin <- NFLwin %>% 
+  group_by(gid) %>% 
+  mutate(wp.home.lead.Scrapr = lead(as.numeric(wp.home.Scrapr), 1)) %>% 
+  mutate(deltawp.home.Scrapr = wp.home.lead.Scrapr - wp.home.Scrapr) 
+
+NFLwin <- NFLwin %>% 
+  mutate(wp.off.lead.Scrapr = ifelse(Home == 1, wp.home.lead.Scrapr, 1 - wp.home.lead.Scrapr)) %>% 
+  mutate(deltawp.off.Scrapr = wp.off.lead.Scrapr - wp.Scrapr) 
+```
+
+## Average the two win probabilities and view accuracy plot together
+
+Here, we make an accuracy plot of the binned win probabilities for each of the two models. 
+
+```{r}
+temp.wp <- NFLwin %>%
+  select(gid, pid, wp.Scrapr, wp.Lock, Home) %>% 
+  mutate(wp.ave = (wp.Lock + wp.Scrapr)/2, 
+        wp.home.ave = ifelse(Home == 1, wp.ave,  1 - wp.ave)) %>%  
+  group_by(gid) %>% 
+  mutate(wp.home.lead.ave = lead(as.numeric(wp.home.ave), 1), 
+         deltawp.home.ave = wp.home.lead.ave - wp.home.ave) %>% 
+  na.omit(wp.home.lead.ave)  %>% #Remove plays at the end of the game where there is no next play.
+  mutate(wp.off.lead.ave = ifelse(Home == 1, wp.home.lead.ave, 1 - wp.home.lead.ave),
+         deltawp.off.ave = wp.off.lead.ave - wp.ave)
+
+
+wp.l.p <- agg.Lock.reg %>% 
+  mutate(wp.model = "Lock") %>% 
+  select(category, mean.win, wp.model)
+
+wp.s.p <- agg.NFLS.reg %>% 
+  mutate(wp.model = "NFLscrapR") %>%  
+  rename(mean.win = mean.win.s) %>% 
+  select(category, mean.win, wp.model)
+
+wp.plot.data <- bind_rows(wp.l.p, wp.s.p)
+
+
+p.wp.test <- ggplot(wp.plot.data, aes(x = category, y = ))
+p.wpacc <- ggplot(wp.plot.data, aes(x = category, y = mean.win, colour = wp.model, shape= wp.model))
+wpacc <- p.wpacc + 
+  geom_point() + 
+  geom_abline(intercept = -.025, slope = 1/20) + 
+  scale_x_continuous(name = "Estimated Win Probability",
+                   breaks=c(1, 5, 10, 15, 20), 
+                   labels=c("0.00", "0.25", ".5", ".75", "1.00")) + 
+  scale_colour_manual(values = c("black", "darkgrey"),
+                                  name  ="Win Probability Model",
+                            breaks=c("Lock", "NFLscrapR"),
+                            labels=c("Lock", "NFLscrapR")) +
+  scale_shape_manual(values = c(19, 3),name  ="Win Probability Model",
+                           breaks=c("Lock", "NFLscrapR"),
+                            labels=c("Lock", "NFLscrapR")) + 
+  ylab("Proportion of Games Won") + 
+  ggtitle("Accuracy of the win probability models") + 
+  theme_bw() + 
+  theme(plot.title = element_text(hjust = 0.5),
+        legend.position = c(.85, .15))
+wpacc
+#ggsave(wpacc, file = "Figures/WP_accuracy_plot.png")
+```
+
+
+## Define NYT 4th Down Bot Strategy
+
+```{r}
+df.goforit <- expand.grid(yfog = 1:99, distance = 1:10)
+df.goforit <- df.goforit %>%
+  mutate(coaches.do = "Punt", coaches.should = "Punt")
+
+
+df.goforit <- df.goforit %>%
+  mutate(
+  coaches.do = ifelse((yfog >=55 & yfog <= 84 & distance == 1), "Go for it", coaches.do),
+  coaches.do = ifelse((yfog >=84 & yfog <= 91 & distance == 1), "FG", coaches.do),
+  coaches.do = ifelse((yfog > 91 & distance == 1), "Go for it", coaches.do),
+  coaches.do = ifelse((yfog > 60 & yfog <=68 & distance ==2), "Go for it", coaches.do),
+  coaches.do = ifelse((yfog > 68 & distance ==2), "FG", coaches.do),
+  coaches.do = ifelse((yfog > 63 & yfog <=67 & distance ==3), "Go for it", coaches.do),
+  coaches.do = ifelse((yfog > 67 & distance ==3), "FG", coaches.do),
+  coaches.do = ifelse((yfog > 64 & yfog <=66 & distance ==4), "Go for it", coaches.do),
+  coaches.do = ifelse((yfog > 66 & distance ==4), "FG", coaches.do),
+  coaches.do = ifelse((yfog > 63 & yfog <=65 & distance ==5), "Go for it", coaches.do),
+  coaches.do = ifelse((yfog > 65 & distance ==5), "FG", coaches.do),
+  coaches.do = ifelse((yfog > 65 & distance ==6), "FG", coaches.do),
+  coaches.do = ifelse((yfog > 65 & distance ==7), "FG", coaches.do),
+  coaches.do = ifelse((yfog > 64 & distance ==8), "FG", coaches.do),
+  coaches.do = ifelse((yfog > 66 & distance ==9), "FG", coaches.do),
+  coaches.do = ifelse((yfog > 66 & distance ==10), "FG", coaches.do)
+  )
+
+df.goforit <- df.goforit %>%
+  mutate(
+   coaches.should = ifelse((distance == 1), "Go for it", coaches.should),
+   coaches.should = ifelse((yfog > 28 & distance == 2), "Go for it", coaches.should),
+   coaches.should = ifelse((yfog > 41 & yfog <=80 & distance == 3), "Go for it", coaches.should), 
+   coaches.should = ifelse((yfog > 80 & yfog <=96 & distance == 3), "FG", coaches.should), 
+   coaches.should = ifelse((yfog > 96 & distance == 3), "Go for it", coaches.should),
+   coaches.should = ifelse((yfog > 45 & yfog <=72 & distance == 4), "Go for it", coaches.should),
+   coaches.should = ifelse((yfog > 72 & distance == 4), "FG", coaches.should),
+   coaches.should = ifelse((yfog > 50 & yfog <=68 & distance == 5), "Go for it", coaches.should),
+   coaches.should = ifelse((yfog > 68 & distance == 5), "FG", coaches.should),
+   coaches.should = ifelse((yfog > 53 & yfog <= 67 & distance == 6), "Go for it", coaches.should),
+   coaches.should = ifelse((yfog > 67 & distance == 6), "FG", coaches.should),
+   coaches.should = ifelse((yfog > 59 & yfog <= 65 & distance == 7), "Go for it", coaches.should),
+   coaches.should = ifelse((yfog > 65 & distance == 7), "FG", coaches.should),
+   coaches.should = ifelse((yfog > 59 & yfog <=64 & distance == 8), "Go for it", coaches.should),
+   coaches.should = ifelse((yfog > 64 & distance == 8), "FG", coaches.should),
+   coaches.should = ifelse((yfog > 62 & yfog <=65 & distance == 9), "Go for it", coaches.should),
+   coaches.should = ifelse((yfog > 65 & distance == 9), "FG", coaches.should),
+   coaches.should = ifelse((yfog > 63 & distance == 10), "FG", coaches.should)
+   )
+
+df.goforit <- df.goforit %>% 
+  filter(yfog + distance <= 100 & yfog + distance >= 10) %>% 
+  rename(ytg = distance) %>% 
+  mutate(dwn = 4)
+
+table(df.goforit$coaches.do, df.goforit$coaches.should)
+
+```
+
+## More filtering and cleaning
+
+```{r}
+## Data check -- do we have 8 regular season home games for each team?
+NFLwin %>% 
+  group_by(gid) %>% 
+  slice(1) %>% 
+  ungroup() %>% 
+  group_by(seas, h) %>% 
+  count() %>% 
+  print.data.frame()
+
+### Did the team go for it on 4th down?
+NFLwin <- NFLwin %>% 
+  mutate(Attempt.4 = ifelse(dwn == 4 & type == "RUSH" |  dwn == 4 & type == "PASS", 1, 0))
+
+### Filter to 4th down plays only, re-define time
+NFLwin.fourth <- NFLwin %>%
+   filter(dwn==4) %>% 
+   mutate(time = floor((3600 - seconds)/60))
+
+#Weather Variables
+Precipitation <- c("Chance Rain",  "Flurries", "Light Rain", 
+                   "Light Showers", "Light Snow", "Rain", "Snow", "Thunderstorms")
+Dome <- c("Closed Roof", "Covered Roof", "Dome")
+
+
+NFLwin.fourth$cond.cat <- "DRY"
+NFLwin.fourth[NFLwin.fourth$cond %in% Precipitation,]$cond.cat <- "Precipitation"
+NFLwin.fourth[NFLwin.fourth$cond %in% Dome,]$cond.cat <- "Dome"
+
+NFLwin.fourth$cond.cat <- factor(NFLwin.fourth$cond.cat, levels = c("DRY", "Dome",  "Precipitation"))
+
+##Redefine Point Differential as a Categorical Variable and then as an ordered factor
+NFLwin.fourth$pointdiff <- cut(NFLwin.fourth$ptsdiff,
+                     c(-Inf, -17, -9, -4, -1, .1, 3, 8, 16, Inf),
+                     labels=c("pdiff.M4", "pdiff.M3",  "pdiff.M2", "pdiff.M1", 
+                              "pdiff.T", "pdiff.P1", "pdiff.P2", "pdiff.P3", "pdiff.P4"))
+
+NFLwin.fourth$pointdiff <- factor(NFLwin.fourth$pointdiff, 
+                                  levels = c("pdiff.M4", "pdiff.M3",  "pdiff.M2", "pdiff.M1", 
+                                             "pdiff.T", "pdiff.P1", "pdiff.P2", "pdiff.P3", "pdiff.P4"))
+
+## Create the final set of fourth down plays
+NFL <- inner_join(NFLwin.fourth, df.goforit) %>% ungroup()
+NFL <- NFL[!is.na(NFL$deltawp.off.Scrapr),] 
+NFL <- NFL %>% filter(pid != 588564)  #win probability calculation is off in the Lock model for this play (no time left, 15 point game)
+
+dim(NFL)
+table(NFL$Attempt.4)
+table(NFL$coaches.should)
+table(NFL$Attempt.4, NFL$coaches.should)
+
+NFL %>% 
+  filter(coaches.should == "Go for it") %>% 
+  group_by(gid, off) %>% 
+  count() %>% 
+  group_by(n) %>% 
+  count()
+
+
+#Export the data set into a new csv file. to be used in matching
+write.csv(NFL, file = "Data/NFL_fourthdown_cleaned.csv", row.names = FALSE)
+```
+
+
+
+
+
+
+
+
+
+
