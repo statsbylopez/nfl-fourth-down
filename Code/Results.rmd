@@ -391,28 +391,24 @@ head(df.team)
 #Export Table to Latex
 print(xtable(df.team), include.rownames=FALSE) #prints the table for latex in the console
 
-
+summary(lm(wins.added ~ gfi.rate, data = df.team))
 
 ```
 
-##Wins added vs. the number of controls
+## Wins added vs. the number of controls
+
 ```{r}
-winsvc <- ggplot(df.team, aes(x = gfi.n, y = wins.added)) +
+winsvc <- ggplot(df.team, aes(x = gfi.rate, y = wins.added)) +
   geom_text(aes(label = Team)) + 
-  geom_smooth(method='lm',formula=y~x -1) +
-  scale_y_continuous("Estimated number of wins added from 2004-2016",
-                     breaks = round(dataframe$med.both, 0),
-                     labels = round(dataframe$med.both, 0),
-                     minor_breaks = NULL) +
+  geom_smooth(method='lm') + 
    ggtitle("Estimated Wins Added vs Proportion of Fourth Down's Attempted")
 
 winsvc
-
-wvc.lm <- lm(med.both ~ n.c - 1, data = dataframe)
-summary(wvc.lm)
+=
 ```
 
 ##Wins Added vs. Win Percentage
+
 ```{r}
 wins.road <- games %>% 
   filter(seas > 2003) %>%
@@ -437,6 +433,8 @@ df.wins <- df.wins %>%
 wvwp.df2 <- left_join(df.all.ave, df.wins)
 head(wvwp.df2)
 
+summary(lm(wins ~ med.both, data = wvwp.df2))
+
 wvwp2 <- ggplot(wvwp.df2, aes(x=wins, y = med.both))
 
 wvwp2 + geom_point() + 
@@ -460,6 +458,7 @@ ggplot(ATC.f.wp, aes(3601-seconds, deltawp.off.Lock, colour = Attempt.4))+ geom_
 ```
 
 #Proportion attempted per season
+
 ```{r}
 ##Do we want the proportion of fourth downs attempted within our range or the proportion overall? Either way the scatter plot does not show a trend, but the proportions are different (~25% in range, ~14% overall). It makes it more universal and impartial to our study to do everything. But we refine our arguments, and deal with some confounding by showing our range.
 
@@ -492,6 +491,7 @@ propatt.scat + geom_point() +
 ```
 
 #Number of "Go for it" situations per game
+
 ```{r}
 NFL.total <- read_csv("NFLfourthdownCombined.csv")
 temp2 <- NFL.total %>% 
