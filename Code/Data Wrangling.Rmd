@@ -22,17 +22,13 @@ library(mgcv)
 
 ## Read in data
 
-*Note*: `plays` and `games` data from Armchair Analysis, while `ratingswinprob` from Football Outsiders
+*Note*: `plays` and `games` data from Armchair Analysis, while `ratingswinprob` is from Football Outsiders
 
 ```{r}
 plays <- read_csv("Data/PLAY.csv")
 games <- read_csv("Data/GAME.csv")
 ratingswinprob <- read.csv("Data/ratings.csv", stringsAsFactors = FALSE)
 
-plays[plays$off == "LA",]$off <- "STL"
-plays[plays$def == "LA",]$def <- "STL"
-games[games$h == "LA",]$h <- "STL"
-games[games$v == "LA",]$v <- "STL"
 ```
 
 ## Data cleaning
@@ -43,6 +39,12 @@ Steps include
 - filter to regular season games, quarters 1-4, from 2004 onwards
 
 ```{r}
+#Ensure names always line up
+plays[plays$off == "LA",]$off <- "STL"
+plays[plays$def == "LA",]$def <- "STL"
+games[games$h == "LA",]$h <- "STL"
+games[games$v == "LA",]$v <- "STL"
+
 #Armchair note: swap offense and Defense when a team punts.
 plays.new <- plays %>%
   mutate(team.temp = off,
@@ -138,7 +140,7 @@ str(NFLwin.train)
 
 ## Random Forest Win Probability Model
 
-Implement random forest win probability model of Lock and Nettleton (JQAS, 2014)
+Implement random forest win probability model of Lock and Nettleton (JQAS, 2014). This model is available on Github.  
 
 ```{r}
 NFLwinprob.Lock.reg = get(load("Models/winprob_lock_rf.RData"))
@@ -160,8 +162,7 @@ NFLwin.test <- mutate(NFLwin.test, won.off = as.numeric(as.character(won.off)))
 agg.Lock.reg <- NFLwin.test %>%
   group_by(predict.cat) %>%
   summarize(mean.win = mean(won.off), n.game = n()) %>%
-  rename(predict.cat = predict.cat) %>% 
-  mutate(category = seq(1:20))
+  rename(predict.cat = predict.cat) 
 
 estWP <- 0:19/20 + 0.025
 WPaccuracy <- cbind(agg.Lock.reg[1:20,], estWP)
@@ -203,7 +204,7 @@ NFLwin <- NFLwin %>%
 
 ## Generalized Additive Win Probability Model
 
-Implement version of generalized additive model used by Horowitz et al with `nflscrapr` package in R
+Implement version of generalized additive model used by Horowitz et al with `nflscrapr` package in R.  This model is available on Github. 
 
 ```{r}
 NFLwinprob.Horowitz.reg = get(load("Models/winprob_horowitz_gam.RData"))
@@ -217,8 +218,7 @@ NFLwin.test$predict.cat.NFLS <- cut(NFLwin.test$wp.Scrapr, breaks = 0:20/20)
 agg.NFLS.reg <- NFLwin.test %>%
   group_by(predict.cat.NFLS) %>%
   summarize(mean.win.s = mean(won.off), n.game.s = n()) %>%
-  rename(predict.cat.NFLS = predict.cat.NFLS) %>% 
-  mutate(category = seq(1:20))
+  rename(predict.cat.NFLS = predict.cat.NFLS) 
 
 estWP <- 0:19/20 + 0.025
 WPaccuracy <- cbind(agg.NFLS.reg[1:20,], estWP)
@@ -253,55 +253,42 @@ NFLwin <- NFLwin %>%
 
 ## Average the two win probabilities and view accuracy plot together
 
-Here, we make an accuracy plot of the binned win probabilities for each of the two models. 
+Here, we make an accuracy plot of each win probability model using predictions on the test data.  
 
 ```{r}
-temp.wp <- NFLwin %>%
-  select(gid, pid, wp.Scrapr, wp.Lock, Home) %>% 
-  mutate(wp.ave = (wp.Lock + wp.Scrapr)/2, 
-        wp.home.ave = ifelse(Home == 1, wp.ave,  1 - wp.ave)) %>%  
-  group_by(gid) %>% 
-  mutate(wp.home.lead.ave = lead(as.numeric(wp.home.ave), 1), 
-         deltawp.home.ave = wp.home.lead.ave - wp.home.ave) %>% 
-  na.omit(wp.home.lead.ave)  %>% #Remove plays at the end of the game where there is no next play.
-  mutate(wp.off.lead.ave = ifelse(Home == 1, wp.home.lead.ave, 1 - wp.home.lead.ave),
-         deltawp.off.ave = wp.off.lead.ave - wp.ave)
+plot.all <- NFLwin.test %>% 
+  select(gid, pid, wp.Scrapr, wp.Lock, won.off) %>% 
+  mutate(scrapr.cat = cut_number(wp.Scrapr, 20), 
+         lock.cat = cut_number(wp.Lock, 20))
+
+lock.probs <- plot.all %>% group_by(lock.cat) %>% 
+  summarise(estimated = mean(wp.Lock), observed = mean(won.off), type = "Lock")
+scrapr.probs <- plot.all %>% group_by(scrapr.cat) %>% 
+  summarise(estimated = mean(wp.Scrapr), observed = mean(won.off), type = "nflscrapR")
+wp.all <- bind_rows(lock.probs, scrapr.probs)
 
 
-wp.l.p <- agg.Lock.reg %>% 
-  mutate(wp.model = "Lock") %>% 
-  select(category, mean.win, wp.model)
 
-wp.s.p <- agg.NFLS.reg %>% 
-  mutate(wp.model = "NFLscrapR") %>%  
-  rename(mean.win = mean.win.s) %>% 
-  select(category, mean.win, wp.model)
-
-wp.plot.data <- bind_rows(wp.l.p, wp.s.p)
-
-
-p.wp.test <- ggplot(wp.plot.data, aes(x = category, y = ))
-p.wpacc <- ggplot(wp.plot.data, aes(x = category, y = mean.win, colour = wp.model, shape= wp.model))
+p.wpacc <- ggplot(wp.all, aes(x = estimated, y = observed, shape = type, colour = type))
 wpacc <- p.wpacc + 
   geom_point() + 
-  geom_abline(intercept = -.025, slope = 1/20) + 
-  scale_x_continuous(name = "Estimated Win Probability",
-                   breaks=c(1, 5, 10, 15, 20), 
-                   labels=c("0.00", "0.25", ".5", ".75", "1.00")) + 
+  geom_abline(intercept = 0, slope = 1) + 
+  scale_x_continuous(labels = scales::percent, "Estimated win rate") + 
+  scale_y_continuous(labels = scales::percent, "Observed win rate") + 
   scale_colour_manual(values = c("black", "darkgrey"),
                                   name  ="Win Probability Model",
-                            breaks=c("Lock", "NFLscrapR"),
-                            labels=c("Lock", "NFLscrapR")) +
+                            breaks=c("Lock", "nflscrapR"),
+                            labels=c("Lock", "nflscrapR")) +
   scale_shape_manual(values = c(19, 3),name  ="Win Probability Model",
-                           breaks=c("Lock", "NFLscrapR"),
-                            labels=c("Lock", "NFLscrapR")) + 
+                           breaks=c("Lock", "nflscrapR"),
+                            labels=c("Lock", "nflscrapR")) + 
   ylab("Proportion of Games Won") + 
   ggtitle("Accuracy of the win probability models") + 
   theme_bw() + 
   theme(plot.title = element_text(hjust = 0.5),
         legend.position = c(.85, .15))
 wpacc
-#ggsave(wpacc, file = "Figures/WP_accuracy_plot.png")
+#ggsave(wpacc, file = "Figures/WP_accuracy_plot.png", height = 6, width = 8)
 ```
 
 
