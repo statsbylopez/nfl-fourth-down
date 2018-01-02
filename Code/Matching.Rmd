@@ -210,9 +210,10 @@ love.plot <- bind_rows(pre.match, post.match)
 love.plot$variable <- as.character(love.plot$variable)
 love.plot$variable <- factor(love.plot$variable, levels = sort(unique(love.plot$variable), decreasing = TRUE))
 love <- love.plot %>% 
-  ggplot(aes(variable, bias, shape = type)) + geom_point() + coord_flip() +
-    scale_shape_manual(values = c(16, 21), "Source")
+  ggplot(aes(variable, bias, shape = type)) + geom_point() + coord_flip() + 
+    scale_shape_manual(values = c(16, 21), "Data cohort") + ylab("Standardized bias") + xlab("Variable") + 
+  ggtitle("Standardized bias, before and after matching")
 love
-#ggsave(file = "Figures/Love_Plot_ATC.png", plot = love)
+ggsave(file = "Figures/Love_Plot_ATC.png", plot = love, height = 6, width = 5.5)
 
 ```
