@@ -140,38 +140,23 @@ str(NFLwin.train)
 
 ## Random Forest Win Probability Model
 
-Implement random forest win probability model of Lock and Nettleton (JQAS, 2014). This model is available on Github.  
+Implement random forest win probability model of Lock and Nettleton (JQAS, 2014). This model is available on Github.This requires use of the Armchair Analysis data. 
+
 
 ```{r}
 NFLwinprob.Lock.reg = get(load("Models/winprob_lock_rf.RData"))
 
 print(NFLwinprob.Lock.reg)
-NFLwinprob.Lock.reg$importance #Show variable importance
+NFLwinprob.Lock.reg$importance #Show variable importance (mostly out of curiousity)
 
-
-##Probability of winning
-NFLwin.test$wp.Lock <- predict(NFLwinprob.Lock.reg, NFLwin.test)
-
-##Probability split into categories
-NFLwin.test$predict.cat <- cut(NFLwin.test$wp.Lock, 20)
-
-##Compare those win probability categories with the true mean outcomes within that group.
-NFLwin.test <- mutate(NFLwin.test, won.off = as.numeric(as.character(won.off)))
-
-#Predict Lock win probability for all plays 
+#Lock win probability for all plays 
 NFLwin$wp.Lock <- predict(NFLwinprob.Lock.reg, NFLwin)
-
-#Define the home team's win probability, since the RF gives the offensive wp
 NFLwin <- NFLwin %>% 
   mutate(wp.home.Lock = ifelse(Home == 1, wp.Lock,  1 - wp.Lock))
-
-#Calculate the change in win probability from each play for the home team
 NFLwin <- NFLwin %>% 
   group_by(gid) %>% 
   mutate(wp.home.lead.Lock = lead(as.numeric(wp.home.Lock), 1)) %>% 
   mutate(deltawp.home.Lock = wp.home.lead.Lock - wp.home.Lock) 
-
-#Calculate the change in win probability from each play for the offensive team
 NFLwin <- NFLwin %>% 
   mutate(wp.off.lead.Lock = ifelse(Home == 1, wp.home.lead.Lock, 1 - wp.home.lead.Lock)) %>% 
   mutate(deltawp.off.Lock = wp.off.lead.Lock - wp.Lock)
@@ -181,28 +166,18 @@ NFLwin <- NFLwin %>%
 
 ## Generalized Additive Win Probability Model
 
-Implement version of generalized additive model used by Horowitz et al with `nflscrapr` package in R.  This model is available on Github. 
+Implement version of generalized additive model used by Horowitz et al with `nflscrapr` package in R.  This model is available on Github. This requires use of the Armchair Analysis data. 
 
 ```{r}
 NFLwinprob.Horowitz.reg = get(load("Models/winprob_horowitz_gam.RData"))
 
-# Run the prediction function on our Test data frame
-NFLwin.test$wp.Scrapr <- predict.gam(NFLwinprob.Horowitz.reg, NFLwin.test, type = "response")
-
-##Probability split into categories
-NFLwin.test$predict.cat.NFLS <- cut(NFLwin.test$wp.Scrapr, breaks = 0:20/20)
-
-
-## NFLscrapr on all observations
+## NFLscrapr for all plays
 NFLwin$wp.Scrapr <- predict.gam(NFLwinprob.Horowitz.reg, NFLwin, type = "response")
-
 NFLwin <- mutate(NFLwin,  wp.home.Scrapr = ifelse(Home == 1, wp.Scrapr,  1 - wp.Scrapr))
-
 NFLwin <- NFLwin %>% 
   group_by(gid) %>% 
   mutate(wp.home.lead.Scrapr = lead(as.numeric(wp.home.Scrapr), 1)) %>% 
   mutate(deltawp.home.Scrapr = wp.home.lead.Scrapr - wp.home.Scrapr) 
-
 NFLwin <- NFLwin %>% 
   mutate(wp.off.lead.Scrapr = ifelse(Home == 1, wp.home.lead.Scrapr, 1 - wp.home.lead.Scrapr)) %>% 
   mutate(deltawp.off.Scrapr = wp.off.lead.Scrapr - wp.Scrapr) 
@@ -213,6 +188,12 @@ NFLwin <- NFLwin %>%
 Here, we make an accuracy plot of each win probability model using predictions on the test data.  
 
 ```{r}
+
+## Predictions on test data
+NFLwin.test$wp.Lock <- predict(NFLwinprob.Lock.reg, NFLwin.test)
+NFLwin.test$wp.Scrapr <- predict.gam(NFLwinprob.Horowitz.reg, NFLwin.test, type = "response")
+
+
 plot.all <- NFLwin.test %>% 
   select(gid, pid, wp.Scrapr, wp.Lock, won.off) %>% 
   mutate(scrapr.cat = cut_number(wp.Scrapr, 20), 
