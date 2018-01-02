@@ -14,6 +14,7 @@ knitr::opts_chunk$set(echo = TRUE, eval = FALSE)
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 library(readr)
+library(tidyr)
 library(dplyr)
 library(splines)
 library(ggplot2)
@@ -66,8 +67,8 @@ pmspl + geom_histogram(position = "identity") + facet_wrap(~Attempt.4) + scale_y
 ```
 
 ## Filter for the common support interval
-```{r}
 
+```{r}
 limits <- NFL %>% 
   filter(coaches.should == "Go for it") %>% 
   group_by(Attempt.4) %>% 
@@ -78,10 +79,9 @@ upper.bound <- max(limits$min.score)
 
 NFL.common.support <- NFL %>% 
   filter(predict.fitms <= low.bound, predict.fitms >= upper.bound)
-
 ```
 
-##Recalculate propensity scores  
+## Recalculate propensity scores on common support
 
 ```{r}
 ps.L2 <- glm(Attempt.4 ~ ns(yfog, 10) * ns(ytg, 5) + ns(yfog, 10) * ns(time, 4) + ns(yfog, 10) * pointdiff + 
@@ -97,7 +97,7 @@ NFL.common.support$predict.fitms2 <- predict(ps.L2, NFL.common.support, type = "
 NFL.gfi <- NFL.common.support %>% 
   filter(coaches.should == "Go for it")
 
-write.csv(NFL.gfi, "Data/NFL.gfi.csv")
+write.csv(NFL.gfi, "Data/NFL.gfi.csv") ## This is saved to re-use later
 ```
 
 ## Match for ATC Random Forest WP Model
@@ -108,7 +108,7 @@ NFL.gfi %>%
   summarise(caliper = 450/sd) #Calculate the caliper size for plays within half of a quarter (450 seconds)
 
 #Create the covariate matching matrix
-psm <- NFL.gfi %>% select(pid, predict.fitms2, wp.ave, ytg, seconds)
+psm <- NFL.gfi %>% dplyr::select(pid, predict.fitms2, wp.ave, ytg, seconds)
 
 
 match.atc  <-   Match(Y = NULL,
@@ -123,8 +123,6 @@ match.atc  <-   Match(Y = NULL,
 pairs.atc <- cbind(match.atc$index.treated, match.atc$index.control)
 dim(pairs.atc)
 
-## Sample a pair
-NFL.gfi[pairs.atc[7,],]
 
 ## treated and control data sets
 treated.atc <- NFL.gfi[match.atc$index.treated,]
@@ -171,7 +169,7 @@ pd2
 ## Love plot for matching effectiveness
 
 ```{r}
-## Variables
+## Variables 
 vars <- c("yfog", "ytg", "time", "pointdiff", "wspd", "cond.cat", "temp", "humd", "sprv", "ou", "OR.pass", "OR.rush", "DR.pass", "DR.rush", "wk", "wp.ave", "Home")
 
 ## Initial data
@@ -215,5 +213,6 @@ love <- love.plot %>%
   ggplot(aes(variable, bias, shape = type)) + geom_point() + coord_flip() +
     scale_shape_manual(values = c(16, 21), "Source")
 love
-ggsave(file = "Figures/Love_Plot_ATC.png", plot = love)
+#ggsave(file = "Figures/Love_Plot_ATC.png", plot = love)
 
+```
