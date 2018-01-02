@@ -372,7 +372,7 @@ ggsave(joy.plot, file = "Figures/Joy_Division_ave_wp.png", height = 8.35, width 
 ## Extra plots looking at team level traits
 
 ```{r}
-## Initial fourth down data
+## Initial fourth down data (how often did teams go for it when they were supposed to?)
 NFL.gfi <- read_csv("Data/NFL.gfi.csv")
 
 df.team <- NFL.gfi %>% 
@@ -384,28 +384,14 @@ df.team <- NFL.gfi %>%
 
 head(df.team)
 
-#Export Table to Latex
+# explort to .tex
 print(xtable(df.team), include.rownames=FALSE) #prints the table for latex in the console
 
 summary(lm(wins.added ~ gfi.rate, data = df.team))
+summary(lm(wins.added ~ gfi.n, data = df.team))
+cor(df.team[,2:4])
 
-```
-
-## Wins added vs. the number of controls
-
-```{r}
-winsvc <- ggplot(df.team, aes(x = gfi.rate, y = wins.added)) +
-  geom_text(aes(label = Team)) + 
-  geom_smooth(method='lm') + 
-   ggtitle("Estimated Wins Added vs Proportion of Fourth Down's Attempted")
-
-winsvc
-=
-```
-
-##Wins Added vs. Win Percentage
-
-```{r}
+### wins added versus win percentage
 wins.road <- games %>% 
   filter(seas > 2003) %>%
   filter(wk < 18) %>%
@@ -428,110 +414,13 @@ df.wins <- df.wins %>%
 
 wvwp.df2 <- left_join(df.all.ave, df.wins)
 head(wvwp.df2)
-
+cor(wvwp.df2[,c(2, 5)])
 summary(lm(wins ~ med.both, data = wvwp.df2))
-
-wvwp2 <- ggplot(wvwp.df2, aes(x=wins, y = med.both))
-
-wvwp2 + geom_point() + 
-  geom_smooth(method='lm',formula=y~x) +
-  scale_y_continuous("Estimated number of wins added",
-                     breaks = round(wvwp.df2$med.both, 0),
-                     labels = round(wvwp.df2$med.both, 0),
-                     minor_breaks = NULL) +
-   ggtitle("Estimated Wins Added (Lock) vs Total Wins ")
-
-
-agg.proxy <- ATC.f.wp %>% 
-  filter(Attempt.4 == 0) %>% 
-  group_by(off) %>%
-  summarise(n.att = n(), sum.prob = sum(ps.L))
-
-df.temp <- agg.proxy %>% rename(team = off) %>% left_join(df.all.ave)
-ggplot(df.temp, aes(sum.prob, med.both, size = n.att))  +geom_point()
-
-ggplot(ATC.f.wp, aes(3601-seconds, deltawp.off.Lock, colour = Attempt.4))+ geom_point() + geom_smooth() 
+## note: each team plays 16 games a season, and so correlation with wins is identical to win percentage
 ```
 
-#Proportion attempted per season
-
-```{r}
-##Do we want the proportion of fourth downs attempted within our range or the proportion overall? Either way the scatter plot does not show a trend, but the proportions are different (~25% in range, ~14% overall). It makes it more universal and impartial to our study to do everything. But we refine our arguments, and deal with some confounding by showing our range.
-
-NFL2 <- read_csv("NFLfourthdownCombined.csv")
-
-temp.t  <- NFL2 %>% 
-  filter(Attempt.4 ==1) %>% 
-  group_by(seas) %>% 
-  summarise( n.t = n())
-
-#coaches.should == "Go for it", 
-temp.c  <- NFL2 %>% 
-  filter(Attempt.4 ==0) %>% 
-  group_by(seas) %>% 
-  summarise( n.c = n())
-  
-temp <- left_join(temp.t, temp.c)
-
-temp <- temp %>%  mutate(propatt = n.t/(n.t+n.c))
-
-propatt.scat <- ggplot(temp, aes(seas, propatt))
-propatt.scat + geom_point() + 
-  xlab("Season") + 
-  ylab("") + 
-  ggtitle("Proportion of Fourth Downs Attempted per Season") + 
-  theme_bw(16) + 
-  theme(plot.title = element_text(hjust = 0.5))
 
 
-```
-
-#Number of "Go for it" situations per game
-
-```{r}
-NFL.total <- read_csv("NFLfourthdownCombined.csv")
-temp2 <- NFL.total %>% 
-  filter(coaches.should == "Go for it") %>% 
-  group_by(gid) %>% 
-  count() %>% 
-  group_by(n) %>% 
-  count()
-
-##We need to make sure that games with no observations have a 0 value instead of nothing.
-totalgames <- length(unique(NFL.total$gid)) # Total number of games
-
-temp.games <- NFL.total %>% 
-  filter(coaches.should == "Go for it") %>% 
-  group_by(gid) %>% 
-  count() 
-
-gameswithplays <- length(unique(temp.games$gid))
-
-totalgames - gameswithplays
-##42 games without a play in this range
-g.without <- c(0, 42)
-
-new.df<- rbind(temp2, g.without)
-
-#recalculate median
-median(rep(new.df$n, new.df$nn))
-
-#proportion of games 
-new.df <- new.df %>% 
-  arrange(n)
-
-new.df %>% 
-  summarise(sumtot = sum(nn))
-
-new.df %>% 
-  filter(n<= 4) %>% 
-  summarize(tot2less = (sum(nn))) 
-  
-
-G <- ggplot(new.df, aes(x = n, y = nn))
-
-G + geom_bar(stat = "identity")
-```
 
 
 
