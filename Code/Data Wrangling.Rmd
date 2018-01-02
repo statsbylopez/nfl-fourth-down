@@ -158,31 +158,8 @@ NFLwin.test$predict.cat <- cut(NFLwin.test$wp.Lock, 20)
 ##Compare those win probability categories with the true mean outcomes within that group.
 NFLwin.test <- mutate(NFLwin.test, won.off = as.numeric(as.character(won.off)))
 
-##Create a data frame to plot calibration
-agg.Lock.reg <- NFLwin.test %>%
-  group_by(predict.cat) %>%
-  summarize(mean.win = mean(won.off), n.game = n()) %>%
-  rename(predict.cat = predict.cat) 
-
-estWP <- 0:19/20 + 0.025
-WPaccuracy <- cbind(agg.Lock.reg[1:20,], estWP)
-
-#View calibration
-p.Lock <- ggplot(agg.Lock.reg, aes(predict.cat, mean.win))
-p.Lock + geom_point() + 
-  geom_abline(intercept = -0.025, slope = 1/20) + 
-  scale_x_discrete(name = "Estimated Win Probability",
-                   breaks=c("(0.000106,0.051]", "(0.201,0.251]","(0.45,0.5]","(0.7,0.75]", "(0.95,1]"), 
-                   labels=c("0.00", "0.25",".5",".75", "1.00")) + 
-  ylab("Proportion of Games Won") + 
-  ggtitle("Accuracy of the Lock win probability model") + 
-  theme_bw() + 
-  theme(legend.position = "none")
-
-#Predict win probability for all plays after we confirmed the accuracy on the test data set
+#Predict Lock win probability for all plays 
 NFLwin$wp.Lock <- predict(NFLwinprob.Lock.reg, NFLwin)
-
-# Apply outcomes from random forest model to observations
 
 #Define the home team's win probability, since the RF gives the offensive wp
 NFLwin <- NFLwin %>% 
@@ -215,28 +192,8 @@ NFLwin.test$wp.Scrapr <- predict.gam(NFLwinprob.Horowitz.reg, NFLwin.test, type 
 ##Probability split into categories
 NFLwin.test$predict.cat.NFLS <- cut(NFLwin.test$wp.Scrapr, breaks = 0:20/20)
 
-agg.NFLS.reg <- NFLwin.test %>%
-  group_by(predict.cat.NFLS) %>%
-  summarize(mean.win.s = mean(won.off), n.game.s = n()) %>%
-  rename(predict.cat.NFLS = predict.cat.NFLS) 
 
-estWP <- 0:19/20 + 0.025
-WPaccuracy <- cbind(agg.NFLS.reg[1:20,], estWP)
-
-p.NFLS <- ggplot(agg.NFLS.reg, aes(predict.cat.NFLS, mean.win.s))
-p.NFLS + geom_point() + 
-  geom_abline(intercept = -0.025, slope = 1/20) + 
-  scale_x_discrete(name = "Estimated Win Probability",
-                   breaks=c("(0.000106,0.051]", "(0.201,0.251]","(0.45,0.5]","(0.7,0.75]", "(0.95,1]"), 
-                   labels=c("0.00", "0.25",".5",".75", "1.00")) + 
-  ylab("Proportion of Games Won") + 
-  ggtitle("Accuracy of the Scrapr win probability model") + 
-  theme_bw() + 
-  theme(legend.position = "none")
-
-
-## NFLscrapr Applying Outcomes to Observations
-
+## NFLscrapr on all observations
 NFLwin$wp.Scrapr <- predict.gam(NFLwinprob.Horowitz.reg, NFLwin, type = "response")
 
 NFLwin <- mutate(NFLwin,  wp.home.Scrapr = ifelse(Home == 1, wp.Scrapr,  1 - wp.Scrapr))
