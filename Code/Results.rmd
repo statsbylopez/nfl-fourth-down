@@ -29,11 +29,6 @@ matched.subset.atc <- read_csv("Data/matched.subset.atc.csv")
 matched.subset.atc <- matched.subset.atc %>% 
   mutate(deltawp.off.ave = (deltawp.off.Lock + deltawp.off.Scrapr)/2)
 matched.subset.atc$pair.id <- rep(1:(nrow(matched.subset.atc)/2), 2)
-```
-
-##Find an individual pair for paper
-
-```{r}
 matched.subset.atc %>% filter(pid == 596302)
 ```
 
@@ -48,13 +43,15 @@ sum.matched
 ```
 
 ## Wilcoxon Rank Sum Test ATC
+
 ```{r}
 wilcox.test(deltawp.off.ave ~ Attempt.4, matched.subset.atc)
 ```
 
-## Density Curve ATC Overall 
+## Density curve -- change in win probability between each of the two groups
+
 ```{r}
-#Lock Results
+#
 pd <- ggplot(matched.subset.atc, aes(x = deltawp.off.ave)) + 
   geom_density(position = "identity", alpha = 0.5, aes(fill = as.factor(Attempt.4))) + 
   scale_fill_brewer(type = "qual", palette = "Dark2") + 
@@ -67,7 +64,7 @@ pd <- ggplot(matched.subset.atc, aes(x = deltawp.off.ave)) +
   
 pd
 
-ggsave(file = "Figures/Results_Density_Curve_ave_wp.png", plot = pd)
+#ggsave(file = "Figures/Results_Density_Curve_ave_wp.png", plot = pd)
 ```
 
 ## Bootstrap for wins added per team 
@@ -175,7 +172,7 @@ df.out.scrapr %>%
 
 
 df.out.lock$type <- "Lock"
-df.out.scrapr$type <- "ScrapR"
+df.out.scrapr$type <- "scrapR"
 df.all <- bind_rows(df.out.lock, df.out.scrapr)
 df.all %>% head()
 
@@ -200,19 +197,18 @@ LvSplot <- ggplot(df.all, aes(team.fact, med, colour = type)) +
   scale_y_continuous(name = "Wins Added") + 
   coord_flip()
 
-LvSplot + 
+wins.added <- LvSplot + 
   theme_bw(10) + 
   scale_colour_manual(name = "Win Probability",
-                      values = c("red", "black", "grey66"), breaks = c("Lock", "Average", "ScrapR")) + 
+                      values = c("red", "black", "grey66"), breaks = c("Lock", "Average", "scrapR")) + 
   ggtitle("Estimated Number of Wins Added from 2004 to 2016") +
   theme(legend.position = c(.85, .15))
+wins.added
 
-
-ggsave(file = "Figures/Results_Scaled.png", dpi = 600, width = 5.5, height = 7, units = "in")
+ggsave(wins.added, file = "Figures/Results_Scaled.png", dpi = 600, width = 5.5, height = 7, units = "in")
 
 df.all.ave %>% 
   summarise(mean = mean(med.both), max = max(med.both), min = min(med.both))
-
 ```
 
 ## Average Delta WP Results
@@ -268,7 +264,7 @@ df.out.ave %>%
 
 ```
 
-## Bootstrap for Joy Division plot 
+## Bootstrap for layered density curves plot 
 
 ```{r}
 set.seed(0)
