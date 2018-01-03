@@ -25,9 +25,10 @@ library(xtable)
 ```{r, include = FALSE}
 games <- read_csv("Data/GAME.csv")
 matched.subset.atc <- read_csv("Data/matched.subset.atc.csv")
-## outcome variable 
+##Create our outcome variable 
 matched.subset.atc <- matched.subset.atc %>% 
   mutate(deltawp.off.ave = (deltawp.off.Lock + deltawp.off.Scrapr)/2)
+
 matched.subset.atc$pair.id <- rep(1:(nrow(matched.subset.atc)/2), 2)
 matched.subset.atc %>% filter(pid == 596302)
 ```
@@ -39,7 +40,9 @@ matched.subset.atc %>% filter(pid == 596302)
 sum.matched <- matched.subset.atc %>% 
   group_by(Attempt.4) %>% 
   summarise(mean.delta = mean(deltawp.off.ave), med.delta = median(deltawp.off.ave), n.plays = n())
+
 sum.matched
+
 ```
 
 ## Wilcoxon Rank Sum Test ATC
@@ -51,7 +54,6 @@ wilcox.test(deltawp.off.ave ~ Attempt.4, matched.subset.atc)
 ## Density curve -- change in win probability between each of the two groups
 
 ```{r}
-#
 pd <- ggplot(matched.subset.atc, aes(x = deltawp.off.ave)) + 
   geom_density(position = "identity", alpha = 0.5, aes(fill = as.factor(Attempt.4))) + 
   scale_fill_brewer(type = "qual", palette = "Dark2") + 
@@ -59,8 +61,11 @@ pd <- ggplot(matched.subset.atc, aes(x = deltawp.off.ave)) +
   xlab("Change in win probability") + ylab("Density") +
   theme(legend.position = "none") + 
   xlim(-.25, .25) + 
-  annotate("text", -.13, 4, label = "Went for it", colour = "#d95f02", alpha = 1) + 
-  annotate("text", .07, 15, label = "Did not go for it", colour = "#1b9e77", alpha = 1) 
+  annotate("text", -.13, 4, label = "Went for it", colour = "#d95f02", alpha = 1, size = 4) + 
+  annotate("text", .07, 15, label = "Did not go for it", colour = "#1b9e77", alpha = 1, size = 4)  + 
+  theme(plot.title = element_text(hjust = 0.5, size = rel(1.2)),
+        axis.title.y = element_text(size = rel(1.2)),
+        axis.title.x = element_text(size = rel(1.2)))
   
 pd
 
@@ -71,6 +76,7 @@ pd
 
 Done for each of the Lock win probability model and the nflscrapR win probability model
 
+##Lock Bootstrap
 ```{r}
 set.seed(1)
 
@@ -82,11 +88,12 @@ for (j in 1:length(teams.b)) {
 
 df0.b <- matched.subset.atc %>% 
   filter(off == teams.b[j], Attempt.4 == 0) %>% 
-  select(off, wp.Lock, predict.fitms2, deltawp.off.Lock, pair.id)
+  dplyr::select(off, wp.Lock, predict.fitms2, deltawp.off.Lock, pair.id)
+
 #The pair is the original row number from the data set we matched from
 df1.b <- matched.subset.atc %>% 
   filter(Attempt.4 == 1, pair.id %in% df0.b$pair.id) %>% 
-  select(off, wp.Lock, predict.fitms2, deltawp.off.Lock)
+  dplyr::select(off, wp.Lock, predict.fitms2, deltawp.off.Lock)
 
 paired.diff.b <- df1.b$deltawp.off.Lock - df0.b$deltawp.off.Lock
          
@@ -120,8 +127,10 @@ colnames(df.out.lock) <- c("team", "lower.bound", "med", "upper.bound", "n.team"
 
 df.out.lock %>% 
   summarise(mean = mean(med), max = max(med), min = min(med))
+```
 
-
+##ScrapR Bootstrap
+```{r}
 #Scrapr WP Results
 teams.b <- sort(unique(matched.subset.atc$off))
 df.out.scrapr <- data.frame(nrow = 32, ncol = 5, NA)
@@ -130,11 +139,11 @@ for (j in 1:length(teams.b)) {
 
 df0.b <- matched.subset.atc %>% 
   filter(off == teams.b[j], Attempt.4 == 0) %>% 
-  select(off, wp.Scrapr, predict.fitms2, deltawp.off.Scrapr, pair.id)
+  dplyr::select(off, wp.Scrapr, predict.fitms2, deltawp.off.Scrapr, pair.id)
 #The pair is the original row number from the data set we matched from
 df1.b <- matched.subset.atc %>% 
   filter(Attempt.4 == 1, pair.id %in% df0.b$pair.id) %>% 
-  select(off, wp.Scrapr, predict.fitms2, deltawp.off.Scrapr)
+  dplyr::select(off, wp.Scrapr, predict.fitms2, deltawp.off.Scrapr)
 
 paired.diff.b <- df1.b$deltawp.off.Scrapr - df0.b$deltawp.off.Scrapr
          
@@ -168,15 +177,17 @@ colnames(df.out.scrapr) <- c("team", "lower.bound", "med", "upper.bound", "n.tea
 
 df.out.scrapr %>% 
   summarise(mean = mean(med), max = max(med), min = min(med))
+```
 
-
-
+##Combine the Lock and the scrapeR bootstrapped results
+```{r}
 df.out.lock$type <- "Lock"
 df.out.scrapr$type <- "scrapR"
 df.all <- bind_rows(df.out.lock, df.out.scrapr)
 df.all %>% head()
 
 df.all.ave <- df.all %>% group_by(team) %>% summarise(med.both = mean(med))
+
 df.all <- df.all %>% left_join(df.all.ave) %>% arrange(med.both)
 df.all$team.fact <- rep(1:32, each = 2) + rep(c(.1, -.1), 32)
 
@@ -202,16 +213,20 @@ wins.added <- LvSplot +
   scale_colour_manual(name = "Win Probability",
                       values = c("red", "black", "grey66"), breaks = c("Lock", "Average", "scrapR")) + 
   ggtitle("Estimated Number of Wins Added from 2004 to 2016") +
-  theme(legend.position = c(.85, .15))
+theme(plot.title = element_text(hjust = 0.5, size = rel(1.2)),
+      legend.position = c(.85, .10),
+        axis.title.y = element_text(size = rel(1.2)),
+        axis.title.x = element_text(size = rel(1.2)))
+
 wins.added
 
-ggsave(wins.added, file = "Figures/Results_Scaled.png", dpi = 600, width = 5.5, height = 7, units = "in")
+#ggsave(wins.added, file = "Figures/Results_Scaled.png", dpi = 600, width = 5.5, height = 7, units = "in")
 
 df.all.ave %>% 
   summarise(mean = mean(med.both), max = max(med.both), min = min(med.both))
 ```
 
-## Average Delta WP Results
+## Our Results: Average Delta WP Results
 
 ```{r}
 set.seed(1)
@@ -223,11 +238,12 @@ for (j in 1:length(teams.b)) {
 
 df0.b <- matched.subset.atc %>% 
   filter(off == teams.b[j], Attempt.4 == 0) %>% 
-  select(off, wp.ave, predict.fitms2, deltawp.off.ave, pair.id)
+  dplyr::select(off, wp.ave, predict.fitms2, deltawp.off.ave, pair.id)
+
 #The pair is the original row number from the data set we matched from
 df1.b <- matched.subset.atc %>% 
   filter(Attempt.4 == 1, pair.id %in% df0.b$pair.id) %>% 
-  select(off, wp.ave, predict.fitms2, deltawp.off.ave)
+  dplyr::select(off, wp.ave, predict.fitms2, deltawp.off.ave)
 
 paired.diff.b <- df1.b$deltawp.off.ave - df0.b$deltawp.off.ave
          
@@ -275,11 +291,11 @@ for (j in 1:length(teams.b)) {
 
 df0.b <- matched.subset.atc %>% 
   filter(off == teams.b[j], Attempt.4 == 0) %>% 
-  select(off, wp.ave, predict.fitms2, deltawp.off.ave, pair.id)
+  dplyr::select(off, wp.ave, predict.fitms2, deltawp.off.ave, pair.id)
 #The pair is the original row number from the data set we matched from
 df1.b <- matched.subset.atc %>% 
   filter(Attempt.4 == 1, pair.id %in% df0.b$pair.id) %>% 
-  select(off, wp.ave, predict.fitms2, deltawp.off.ave)
+  dplyr::select(off, wp.ave, predict.fitms2, deltawp.off.ave)
 
 paired.diff <- df1.b$deltawp.off.ave - df0.b$deltawp.off.ave
   
@@ -341,7 +357,8 @@ p <- ggplot(df, aes(x, ymin = ymin, ymax = ymax)) +
         axis.text.y = element_blank(),
         axis.text.x =element_text(size=15),
         axis.ticks = element_blank(),
-        axis.title = element_blank()) 
+        axis.title.y = element_text("Franchise"),
+        axis.title.x = element_text("Number Of Wins")) 
 
 
 
@@ -360,12 +377,23 @@ for (i in unique(df$GroupNum)) {
 
 
 #Adding labels to the density curves.
-p <- p + geom_text(data = labels[labels$team == "ARI",], aes(xmed - xlabel/50, ylabel), 
-                   label = "Median", colour = "#F0F0F0", hjust = 0, fontface = "italic", size = 3.5)  
-joy.plot <- p + ggtitle("Estimated Number of Wins Added from 2004 to 2016") + xlab("Number of Wins")
+p <- p + geom_text(data = labels[labels$team == "ARI",],
+                   aes(xmed - xlabel/50, ylabel), 
+                   label = "Median", colour = "#F0F0F0",
+                   hjust = 0, fontface = "italic", size = 3.5)  
+
+joy.plot <- p +
+  ggtitle("Estimated Number of Wins Added from 2004 to 2016") +
+  xlab("Number of Wins") +
+  ylab("Franchise") + 
+  theme(plot.title = element_text(hjust = 0.5, size = rel(1.2)),
+        axis.title.y = element_text(size = rel(1.2)),
+        axis.title.x = element_text(size = rel(1.2)))
+
+
 joy.plot
 
-ggsave(joy.plot, file = "Figures/Joy_Division_ave_wp.png", height = 8.35, width = 6.8)
+#ggsave(joy.plot, file = "Figures/Joy_Division_ave_wp.png", height = 8.35, width = 6.8)
 
 ```
 
@@ -379,8 +407,11 @@ df.team <- NFL.gfi %>%
   group_by(off) %>% 
   summarise(gfi.rate = mean(Attempt.4), gfi.n = n()) %>% 
   left_join(df.all.ave, by = c("off" = "team")) %>% 
-  dplyr::select(-type, -team.fact) %>% 
-  rename(Team = off, wins.added = med.both)
+  dplyr::select(-type, -team.fact)
+
+colnames(df.team)[colnames(df.team)== "off"] <- "Team"
+colnames(df.team)[colnames(df.team)== "med.both"] <- "wins.added"
+
 
 head(df.team)
 
@@ -406,8 +437,10 @@ wins.home <- games %>%
 
 df.wins <- data.frame(wins.road$v, wins.road$win.road, wins.home$win.home)
 
+  
+colnames(df.wins)[colnames(df.wins)== "wins.road.v"] <- "team"
+
 df.wins <- df.wins %>%
-  rename(team = wins.road.v) %>% 
   mutate(wins = wins.road.win.road + wins.home.win.home) %>% 
   dplyr::select(team, wins)
 

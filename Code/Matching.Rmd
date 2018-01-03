@@ -28,6 +28,7 @@ set.seed(100)
 ```{r}
 NFL <- read_csv("Data/NFL_fourthdown_cleaned.csv")
 sample_n(NFL, 1)
+#Create an averaged win probability
 NFL <- mutate(NFL, wp.ave = (wp.Lock + wp.Scrapr)/2)
 ```
 
@@ -39,10 +40,14 @@ pd <- ggplot(NFL, aes(x = ptsdiff)) +
   scale_fill_brewer(type = "qual", palette = "Dark2") + 
   ggtitle("Point differential before fourth down plays") + 
   xlab("Point Differential") + ylab("Density") +
-  theme(legend.position = "none") + 
   xlim(-40, 35) + 
-  annotate("text", -23, .025, label = "Went for it", colour = "#d95f02", alpha = 1) + 
-  annotate("text", 12, .05, label = "Did not go for it", colour = "#1b9e77", alpha = 1)
+  annotate("text", -23, .025, label = "Went for it", colour = "#d95f02", alpha = 1, size = 4) + 
+  annotate("text", 12, .05, label = "Did not go for it", colour = "#1b9e77", alpha = 1, size = 4) + 
+  theme(plot.title = element_text(hjust = 0.5, size = rel(1.2)),
+        legend.position = "none",
+        axis.title.y = element_text(size = rel(1.2)),
+        axis.title.x = element_text(size = rel(1.2)),
+        axis.text.y = element_blank())
 pd
 
 #ggsave(file = "Figures/Point_Differential_Imbalance.png", plot = pd)
@@ -97,7 +102,7 @@ NFL.common.support$predict.fitms2 <- predict(ps.L2, NFL.common.support, type = "
 NFL.gfi <- NFL.common.support %>% 
   filter(coaches.should == "Go for it")
 
-write.csv(NFL.gfi, "Data/NFL.gfi.csv") ## This is saved to re-use later
+#write.csv(NFL.gfi, "Data/NFL.gfi.csv") ## This is saved to re-use later
 ```
 
 ## Match for ATC Random Forest WP Model
@@ -111,7 +116,7 @@ NFL.gfi %>%
 psm <- NFL.gfi %>% dplyr::select(pid, predict.fitms2, wp.ave, ytg, seconds)
 
 
-match.atc  <-   Match(Y = NULL,
+match.atc <- Match(Y = NULL,
                 estimand = "ATC",
                 Tr = as.numeric(NFL.gfi$Attempt.4),
                 M = 1, 
@@ -130,12 +135,10 @@ control.atc <- NFL.gfi[match.atc$index.control,]
 
 #Define the paired id which is the row number from NFL.GFI dataset
 treated.atc <- cbind(treated.atc, pairs.atc[,2])
-treated.atc <- treated.atc %>% 
-  rename(paired.id = `pairs.atc[, 2]`)
+colnames(treated.atc)[colnames(treated.atc)== "pairs.atc[, 2]"] <- "paired.id"
 
 control.atc <- cbind(control.atc, pairs.atc[,1])
-control.atc <- control.atc %>% 
-  rename(paired.id = `pairs.atc[, 1]`)
+colnames(control.atc)[colnames(control.atc)== "pairs.atc[, 1]"] <- "paired.id"
 
 #Define the matched pair for the team plot
 control.atc$off.pair <- control.atc$off
@@ -156,8 +159,13 @@ pd2 <- ggplot(matched.subset.atc, aes(x = ptsdiff)) +
   xlab("Point Differential") + ylab("Density") +
   theme(legend.position = "none") + 
   xlim(-40, 35) + 
-  annotate("text", -23, .025, label = "Went for it", colour = "#d95f02", alpha = 1) + 
-  annotate("text", 12, .05, label = "Did not go for it", colour = "#1b9e77", alpha = 1)
+  annotate("text", -23, .025, label = "Went for it", colour = "#d95f02", alpha = 1, size = 4) + 
+  annotate("text", 12, .05, label = "Did not go for it", colour = "#1b9e77", alpha = 1, size = 4) +
+  theme(plot.title = element_text(hjust = 0.5, size = rel(1.2)),
+        legend.position = "none",
+        axis.title.y = element_text(size = rel(1.2)),
+        axis.title.x = element_text(size = rel(1.2)),
+        axis.text.y = element_blank())
 pd2
 
 #ggsave(file = "Figures/Point_Differential_ATC.png", plot = pd2)
@@ -172,7 +180,7 @@ pd2
 ## Variables 
 vars <- c("yfog", "ytg", "time", "pointdiff", "wspd", "cond.cat", "temp", "humd", "sprv", "ou", "OR.pass", "OR.rush", "DR.pass", "DR.rush", "wk", "wp.ave", "Home")
 
-## Initial data
+##Calculate the standardized bias of the Initial data
 NFL.gfi.love <- NFL.gfi[,vars]
 NFL.gfi.love <- data.frame(model.matrix(~., data = NFL.gfi.love)[,-1])
 NFL.gfi.love$Attempt.4 <- NFL.gfi$Attempt.4
@@ -189,7 +197,7 @@ pre.match <- NFL.gfi.gather %>%
   mutate(type = "pre-matched")%>% 
   dplyr::select(variable, bias, type)
   
-## Matched data
+##Calculate the standardized bias of the Matched data
 matched.subset.atc.love <- matched.subset.atc[,vars]
 matched.subset.atc.love <- data.frame(model.matrix(~., data = matched.subset.atc.love)[,-1])
 matched.subset.atc.love$Attempt.4 <- matched.subset.atc$Attempt.4
@@ -206,14 +214,38 @@ post.match <- matched.subset.atc.gather %>%
   mutate(type = "post-matched") %>% 
   dplyr::select(variable, bias, type)
 
+#Combine the data frames for the love plot
 love.plot <- bind_rows(pre.match, post.match)
+
+##Rename some of the variable names for the plot
 love.plot$variable <- as.character(love.plot$variable)
+love.plot$variable[love.plot$variable == "cond.catDome"] <- "condcatDry"
+love.plot$variable[love.plot$variable == "cond.catPrecipitation"] <- "condcatPrecip"
+love.plot$variable[love.plot$variable == "pointdiffpdiff.M1"] <- "pointdiff.M1"
+love.plot$variable[love.plot$variable == "pointdiffpdiff.M2"] <- "pointdiff.M2"
+love.plot$variable[love.plot$variable == "pointdiffpdiff.M3"] <- "pointdiff.M3"
+love.plot$variable[love.plot$variable == "pointdiffpdiff.P1"] <- "pointdiff.P1"
+love.plot$variable[love.plot$variable == "pointdiffpdiff.P2"] <- "pointdiff.P2"
+love.plot$variable[love.plot$variable == "pointdiffpdiff.P3"] <- "pointdiff.P3"
+love.plot$variable[love.plot$variable == "pointdiffpdiff.P4"] <- "pointdiff.P4"
+love.plot$variable[love.plot$variable == "pointdiffpdiff.T"] <- "pointdiff.T"
+
 love.plot$variable <- factor(love.plot$variable, levels = sort(unique(love.plot$variable), decreasing = TRUE))
+
+
 love <- love.plot %>% 
-  ggplot(aes(variable, bias, shape = type)) + geom_point() + coord_flip() + 
+  ggplot(aes(variable, bias, shape = type)) + geom_point() +
+  geom_hline(yintercept = -0.2, lty = 2) +
+  geom_hline(yintercept = 0.2, lty = 2) +
+  coord_flip() + 
     scale_shape_manual(values = c(16, 21), "Data cohort") + ylab("Standardized bias") + xlab("Variable") + 
-  ggtitle("Standardized bias, before and after matching")
+  ggtitle("Standardized bias, before and after matching") +
+  theme(plot.title = element_text(hjust = 0.5, size = rel(1.2)),
+        axis.title.y = element_text(size = rel(1.2)),
+        axis.title.x = element_text(size = rel(1.2)))
 love
-ggsave(file = "Figures/Love_Plot_ATC.png", plot = love, height = 6, width = 5.5)
+
+#ggsave(file = "Figures/Love_Plot_ATC.png", plot = love, height = 6, width = 5.5)
 
 ```
+
