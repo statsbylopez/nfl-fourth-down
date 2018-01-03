@@ -380,7 +380,8 @@ NFL %>%
 #write.csv(NFL, file = "Data/NFL_fourthdown_cleaned.csv", row.names = FALSE)
 ```
 
-##Create a plot of the proportion of fourth downs attempted over the past 13 seasons.
+## Create a plot of the proportion of fourth downs attempted over the past 13 seasons.
+
 ```{r}
 head(NFL)
 
