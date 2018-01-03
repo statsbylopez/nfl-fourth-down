@@ -3,7 +3,7 @@ Analysis of NFL fourth down decision making
 
 This repository contains RMarkdown code for a manuscript written by Michael Lopez and Derrick Yam pertaining to fourth down decision making in the National Football League. You can view a preprint of our manuscript [here]()
 
-There are three .rmd files provided in the `Code/` section.. 
+There are three .rmd files provided in the `Code/` section.
 
 *Data Wrangling.rmd*: This file provides all of our data wrangling code. This file takes two data sources (Armchair Analysis, Football Outsiders) and cleans them for matching and analysis. This file also links each play to two win probability estimates, generated using a random forest algorithm (`Models/winprob_lock_rf.Rdata`) and a generalized additive model (`Models/winprob_horowitz_gam.RData`).  
 
