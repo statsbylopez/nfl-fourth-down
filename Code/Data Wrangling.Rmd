@@ -384,7 +384,7 @@ NFL %>%
 
 ```{r}
 head(NFL)
-
+ 
 prop.df <- NFL %>% 
   group_by(seas) %>% 
   summarise(propatt = mean(Attempt.4))
