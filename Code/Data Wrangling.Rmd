@@ -40,6 +40,7 @@ Steps include
 
 ```{r}
 #Ensure names always line up
+#The only franchise that changed during these seasons was the Rams to LA
 plays[plays$off == "LA",]$off <- "STL"
 plays[plays$def == "LA",]$def <- "STL"
 games[games$h == "LA",]$h <- "STL"
@@ -70,7 +71,7 @@ NFLwin <- NFLwin %>%
 
 #Filter out observations we will not use in our win probability model or analyses.
 NFLwin <- NFLwin %>% 
-  filter(qtr <5) %>% 
+  filter(qtr < 5) %>% 
   filter(seas > 2003) %>% 
   filter(type != "NOPL") %>% 
   filter(wk < 18)
@@ -124,6 +125,8 @@ dim(NFLwin)
 dim(NFLwin.test)
 dim(NFLwin.train)
 
+isTRUE(dim(NFLwin)[1] == dim(NFLwin.test)[1] + dim(NFLwin.train)[1])
+
 # Strip the training dataset of extra variables
 NFLwin.train <- NFLwin.train %>% 
    select(won.off, sprv , ptsdiff , seconds , score.lev , totalpoints,
@@ -140,23 +143,28 @@ str(NFLwin.train)
 
 ## Random Forest Win Probability Model
 
-Implement random forest win probability model of Lock and Nettleton (JQAS, 2014). This model is available on Github.This requires use of the Armchair Analysis data. 
-
+Implement random forest win probability model of Lock and Nettleton (JQAS, 2014). This model is available on Github. This requires use of the Armchair Analysis data.
 
 ```{r}
+#Note: this win probability model is trained strictly on our training data set.
 NFLwinprob.Lock.reg = get(load("Models/winprob_lock_rf.RData"))
 
 print(NFLwinprob.Lock.reg)
 NFLwinprob.Lock.reg$importance #Show variable importance (mostly out of curiousity)
 
-#Lock win probability for all plays 
+#Apply Lock win probability for all plays 
 NFLwin$wp.Lock <- predict(NFLwinprob.Lock.reg, NFLwin)
+
+#Define the win probability for the home team
 NFLwin <- NFLwin %>% 
   mutate(wp.home.Lock = ifelse(Home == 1, wp.Lock,  1 - wp.Lock))
+
+#Create a variable for the change in win probability using the RF model.
 NFLwin <- NFLwin %>% 
   group_by(gid) %>% 
   mutate(wp.home.lead.Lock = lead(as.numeric(wp.home.Lock), 1)) %>% 
   mutate(deltawp.home.Lock = wp.home.lead.Lock - wp.home.Lock) 
+
 NFLwin <- NFLwin %>% 
   mutate(wp.off.lead.Lock = ifelse(Home == 1, wp.home.lead.Lock, 1 - wp.home.lead.Lock)) %>% 
   mutate(deltawp.off.Lock = wp.off.lead.Lock - wp.Lock)
@@ -169,15 +177,19 @@ NFLwin <- NFLwin %>%
 Implement version of generalized additive model used by Horowitz et al with `nflscrapr` package in R.  This model is available on Github. This requires use of the Armchair Analysis data. 
 
 ```{r}
+#Note: again this is trained only on our training data set.
 NFLwinprob.Horowitz.reg = get(load("Models/winprob_horowitz_gam.RData"))
 
 ## NFLscrapr for all plays
 NFLwin$wp.Scrapr <- predict.gam(NFLwinprob.Horowitz.reg, NFLwin, type = "response")
 NFLwin <- mutate(NFLwin,  wp.home.Scrapr = ifelse(Home == 1, wp.Scrapr,  1 - wp.Scrapr))
+
+##Create a variable for the change in win probability using the GAM
 NFLwin <- NFLwin %>% 
   group_by(gid) %>% 
   mutate(wp.home.lead.Scrapr = lead(as.numeric(wp.home.Scrapr), 1)) %>% 
   mutate(deltawp.home.Scrapr = wp.home.lead.Scrapr - wp.home.Scrapr) 
+
 NFLwin <- NFLwin %>% 
   mutate(wp.off.lead.Scrapr = ifelse(Home == 1, wp.home.lead.Scrapr, 1 - wp.home.lead.Scrapr)) %>% 
   mutate(deltawp.off.Scrapr = wp.off.lead.Scrapr - wp.Scrapr) 
@@ -188,43 +200,49 @@ NFLwin <- NFLwin %>%
 Here, we make an accuracy plot of each win probability model using predictions on the test data.  
 
 ```{r}
-
-## Predictions on test data
+## Predict WP on test data
 NFLwin.test$wp.Lock <- predict(NFLwinprob.Lock.reg, NFLwin.test)
 NFLwin.test$wp.Scrapr <- predict.gam(NFLwinprob.Horowitz.reg, NFLwin.test, type = "response")
 
-
+##Create a data frame for the WP accuracy plot
 plot.all <- NFLwin.test %>% 
   select(gid, pid, wp.Scrapr, wp.Lock, won.off) %>% 
   mutate(scrapr.cat = cut_number(wp.Scrapr, 20), 
          lock.cat = cut_number(wp.Lock, 20))
 
-lock.probs <- plot.all %>% group_by(lock.cat) %>% 
+lock.probs <- plot.all %>% 
+  group_by(lock.cat) %>% 
   summarise(estimated = mean(wp.Lock), observed = mean(won.off), type = "Lock")
-scrapr.probs <- plot.all %>% group_by(scrapr.cat) %>% 
+
+scrapr.probs <- plot.all %>%
+  group_by(scrapr.cat) %>% 
   summarise(estimated = mean(wp.Scrapr), observed = mean(won.off), type = "nflscrapR")
+
 wp.all <- bind_rows(lock.probs, scrapr.probs)
 
+p.wpacc <- ggplot(wp.all, aes(x = estimated, y = observed,
+                              shape = type, colour = type))
 
-
-p.wpacc <- ggplot(wp.all, aes(x = estimated, y = observed, shape = type, colour = type))
 wpacc <- p.wpacc + 
-  geom_point() + 
+  geom_point(size = 2.5) + 
   geom_abline(intercept = 0, slope = 1) + 
   scale_x_continuous(labels = scales::percent, "Estimated win rate") + 
   scale_y_continuous(labels = scales::percent, "Observed win rate") + 
-  scale_colour_manual(values = c("black", "darkgrey"),
+  scale_colour_manual(values = c("black", "red"),
                                   name  ="Win Probability Model",
                             breaks=c("Lock", "nflscrapR"),
                             labels=c("Lock", "nflscrapR")) +
-  scale_shape_manual(values = c(19, 3),name  ="Win Probability Model",
+  scale_shape_manual(values = c(19, 3), name  ="Win Probability Model",
                            breaks=c("Lock", "nflscrapR"),
                             labels=c("Lock", "nflscrapR")) + 
   ylab("Proportion of Games Won") + 
   ggtitle("Accuracy of the win probability models") + 
   theme_bw() + 
-  theme(plot.title = element_text(hjust = 0.5),
-        legend.position = c(.85, .15))
+  theme(plot.title = element_text(hjust = 0.5, size = rel(1.5)),
+        panel.background = element_rect(fill = "#F0F0F0"),
+        legend.position = c(.85, .15),
+        axis.title.y = element_text(size = rel(1.5)),
+        axis.title.x = element_text(size = rel(1.5)))
 wpacc
 #ggsave(wpacc, file = "Figures/WP_accuracy_plot.png", height = 6, width = 8)
 ```
@@ -233,56 +251,55 @@ wpacc
 ## Define NYT 4th Down Bot Strategy
 
 ```{r}
-df.goforit <- expand.grid(yfog = 1:99, distance = 1:10)
+df.goforit <- expand.grid(yfog = 1:99, ytg = 1:10)
 df.goforit <- df.goforit %>%
   mutate(coaches.do = "Punt", coaches.should = "Punt")
 
 
 df.goforit <- df.goforit %>%
   mutate(
-  coaches.do = ifelse((yfog >=55 & yfog <= 84 & distance == 1), "Go for it", coaches.do),
-  coaches.do = ifelse((yfog >=84 & yfog <= 91 & distance == 1), "FG", coaches.do),
-  coaches.do = ifelse((yfog > 91 & distance == 1), "Go for it", coaches.do),
-  coaches.do = ifelse((yfog > 60 & yfog <=68 & distance ==2), "Go for it", coaches.do),
-  coaches.do = ifelse((yfog > 68 & distance ==2), "FG", coaches.do),
-  coaches.do = ifelse((yfog > 63 & yfog <=67 & distance ==3), "Go for it", coaches.do),
-  coaches.do = ifelse((yfog > 67 & distance ==3), "FG", coaches.do),
-  coaches.do = ifelse((yfog > 64 & yfog <=66 & distance ==4), "Go for it", coaches.do),
-  coaches.do = ifelse((yfog > 66 & distance ==4), "FG", coaches.do),
-  coaches.do = ifelse((yfog > 63 & yfog <=65 & distance ==5), "Go for it", coaches.do),
-  coaches.do = ifelse((yfog > 65 & distance ==5), "FG", coaches.do),
-  coaches.do = ifelse((yfog > 65 & distance ==6), "FG", coaches.do),
-  coaches.do = ifelse((yfog > 65 & distance ==7), "FG", coaches.do),
-  coaches.do = ifelse((yfog > 64 & distance ==8), "FG", coaches.do),
-  coaches.do = ifelse((yfog > 66 & distance ==9), "FG", coaches.do),
-  coaches.do = ifelse((yfog > 66 & distance ==10), "FG", coaches.do)
+  coaches.do = ifelse((yfog >=55 & yfog <= 84 & ytg == 1), "Go for it", coaches.do),
+  coaches.do = ifelse((yfog >=84 & yfog <= 91 & ytg == 1), "FG", coaches.do),
+  coaches.do = ifelse((yfog > 91 & ytg == 1), "Go for it", coaches.do),
+  coaches.do = ifelse((yfog > 60 & yfog <=68 & ytg ==2), "Go for it", coaches.do),
+  coaches.do = ifelse((yfog > 68 & ytg ==2), "FG", coaches.do),
+  coaches.do = ifelse((yfog > 63 & yfog <=67 & ytg ==3), "Go for it", coaches.do),
+  coaches.do = ifelse((yfog > 67 & ytg ==3), "FG", coaches.do),
+  coaches.do = ifelse((yfog > 64 & yfog <=66 & ytg ==4), "Go for it", coaches.do),
+  coaches.do = ifelse((yfog > 66 & ytg ==4), "FG", coaches.do),
+  coaches.do = ifelse((yfog > 63 & yfog <=65 & ytg ==5), "Go for it", coaches.do),
+  coaches.do = ifelse((yfog > 65 & ytg ==5), "FG", coaches.do),
+  coaches.do = ifelse((yfog > 65 & ytg ==6), "FG", coaches.do),
+  coaches.do = ifelse((yfog > 65 & ytg ==7), "FG", coaches.do),
+  coaches.do = ifelse((yfog > 64 & ytg ==8), "FG", coaches.do),
+  coaches.do = ifelse((yfog > 66 & ytg ==9), "FG", coaches.do),
+  coaches.do = ifelse((yfog > 66 & ytg ==10), "FG", coaches.do)
   )
 
 df.goforit <- df.goforit %>%
   mutate(
-   coaches.should = ifelse((distance == 1), "Go for it", coaches.should),
-   coaches.should = ifelse((yfog > 28 & distance == 2), "Go for it", coaches.should),
-   coaches.should = ifelse((yfog > 41 & yfog <=80 & distance == 3), "Go for it", coaches.should), 
-   coaches.should = ifelse((yfog > 80 & yfog <=96 & distance == 3), "FG", coaches.should), 
-   coaches.should = ifelse((yfog > 96 & distance == 3), "Go for it", coaches.should),
-   coaches.should = ifelse((yfog > 45 & yfog <=72 & distance == 4), "Go for it", coaches.should),
-   coaches.should = ifelse((yfog > 72 & distance == 4), "FG", coaches.should),
-   coaches.should = ifelse((yfog > 50 & yfog <=68 & distance == 5), "Go for it", coaches.should),
-   coaches.should = ifelse((yfog > 68 & distance == 5), "FG", coaches.should),
-   coaches.should = ifelse((yfog > 53 & yfog <= 67 & distance == 6), "Go for it", coaches.should),
-   coaches.should = ifelse((yfog > 67 & distance == 6), "FG", coaches.should),
-   coaches.should = ifelse((yfog > 59 & yfog <= 65 & distance == 7), "Go for it", coaches.should),
-   coaches.should = ifelse((yfog > 65 & distance == 7), "FG", coaches.should),
-   coaches.should = ifelse((yfog > 59 & yfog <=64 & distance == 8), "Go for it", coaches.should),
-   coaches.should = ifelse((yfog > 64 & distance == 8), "FG", coaches.should),
-   coaches.should = ifelse((yfog > 62 & yfog <=65 & distance == 9), "Go for it", coaches.should),
-   coaches.should = ifelse((yfog > 65 & distance == 9), "FG", coaches.should),
-   coaches.should = ifelse((yfog > 63 & distance == 10), "FG", coaches.should)
+   coaches.should = ifelse((ytg == 1), "Go for it", coaches.should),
+   coaches.should = ifelse((yfog > 28 & ytg == 2), "Go for it", coaches.should),
+   coaches.should = ifelse((yfog > 41 & yfog <=80 & ytg == 3), "Go for it", coaches.should), 
+   coaches.should = ifelse((yfog > 80 & yfog <=96 & ytg == 3), "FG", coaches.should), 
+   coaches.should = ifelse((yfog > 96 & ytg == 3), "Go for it", coaches.should),
+   coaches.should = ifelse((yfog > 45 & yfog <=72 & ytg == 4), "Go for it", coaches.should),
+   coaches.should = ifelse((yfog > 72 & ytg == 4), "FG", coaches.should),
+   coaches.should = ifelse((yfog > 50 & yfog <=68 & ytg == 5), "Go for it", coaches.should),
+   coaches.should = ifelse((yfog > 68 & ytg == 5), "FG", coaches.should),
+   coaches.should = ifelse((yfog > 53 & yfog <= 67 & ytg == 6), "Go for it", coaches.should),
+   coaches.should = ifelse((yfog > 67 & ytg == 6), "FG", coaches.should),
+   coaches.should = ifelse((yfog > 59 & yfog <= 65 & ytg == 7), "Go for it", coaches.should),
+   coaches.should = ifelse((yfog > 65 & ytg == 7), "FG", coaches.should),
+   coaches.should = ifelse((yfog > 59 & yfog <=64 & ytg == 8), "Go for it", coaches.should),
+   coaches.should = ifelse((yfog > 64 & ytg == 8), "FG", coaches.should),
+   coaches.should = ifelse((yfog > 62 & yfog <=65 & ytg == 9), "Go for it", coaches.should),
+   coaches.should = ifelse((yfog > 65 & ytg == 9), "FG", coaches.should),
+   coaches.should = ifelse((yfog > 63 & ytg == 10), "FG", coaches.should)
    )
 
 df.goforit <- df.goforit %>% 
-  filter(yfog + distance <= 100 & yfog + distance >= 10) %>% 
-  rename(ytg = distance) %>% 
+  filter(yfog + ytg <= 100 & yfog + ytg >= 10) %>% 
   mutate(dwn = 4)
 
 table(df.goforit$coaches.do, df.goforit$coaches.should)
@@ -305,7 +322,7 @@ NFLwin %>%
 NFLwin <- NFLwin %>% 
   mutate(Attempt.4 = ifelse(dwn == 4 & type == "RUSH" |  dwn == 4 & type == "PASS", 1, 0))
 
-### Filter to 4th down plays only, re-define time
+### Filter to 4th down plays only, re-define time as a minute
 NFLwin.fourth <- NFLwin %>%
    filter(dwn==4) %>% 
    mutate(time = floor((3600 - seconds)/60))
@@ -342,12 +359,23 @@ table(NFL$Attempt.4)
 table(NFL$coaches.should)
 table(NFL$Attempt.4, NFL$coaches.should)
 
+##Check the number of plays within the go for it range within each individual game
 NFL %>% 
   filter(coaches.should == "Go for it") %>% 
   group_by(gid, off) %>% 
   count() %>% 
   group_by(n) %>% 
   count()
+
+NFL %>% 
+  filter(coaches.should == "Go for it") %>% 
+  group_by(gid, off) %>% 
+  count() %>% 
+  group_by(n) %>% 
+  count() %>% 
+  mutate(tot = nn*n) %>% 
+  ungroup() %>% 
+  summarise(AverageNumberPerGame = sum(tot)/sum(nn))
 
 
 #Export the data set into a new csv file. to be used in matching
