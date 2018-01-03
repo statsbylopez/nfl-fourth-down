@@ -25,10 +25,10 @@ library(mgcv)
 *Note*: `plays` and `games` data from Armchair Analysis, while `ratingswinprob` is from Football Outsiders
 
 ```{r}
-plays <- read_csv("Data/PLAY.csv")
-games <- read_csv("Data/GAME.csv")
-ratingswinprob <- read.csv("Data/ratings.csv", stringsAsFactors = FALSE)
-
+#plays <- read_csv("Data/PLAY.csv")
+#games <- read_csv("Data/GAME.csv")
+#ratingswinprob <- read.csv("Data/ratings.csv", stringsAsFactors = FALSE)
+#
 ```
 
 ## Data cleaning
@@ -377,10 +377,29 @@ NFL %>%
 
 
 #Export the data set into a new csv file. to be used in matching
-write.csv(NFL, file = "Data/NFL_fourthdown_cleaned.csv", row.names = FALSE)
+#write.csv(NFL, file = "Data/NFL_fourthdown_cleaned.csv", row.names = FALSE)
 ```
 
+##Create a plot of the proportion of fourth downs attempted over the past 13 seasons.
+```{r}
+head(NFL)
 
+prop.df <- NFL %>% 
+  group_by(seas) %>% 
+  summarise(propatt = mean(Attempt.4))
+
+propatt.gg <- ggplot(prop.df, aes(seas, propatt)) + geom_point(size = 3) + 
+  ggtitle("Proportion of fourth downs attempted within the Bot's go for it range") +
+  xlab("Season") + ylab("Proportion Attempted") + 
+  theme(plot.title = element_text(hjust = 0.5, size = rel(1.2)),
+        axis.title.y = element_text(size = rel(1.2)),
+        axis.title.x = element_text(size = rel(1.2)))
+
+propatt.gg
+
+#ggsave(file = "Figures/PropAttempt_per_season.png", plot = propatt.gg)
+
+```
 
 
 
