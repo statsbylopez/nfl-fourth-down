@@ -129,7 +129,7 @@ isTRUE(dim(NFLwin)[1] == dim(NFLwin.test)[1] + dim(NFLwin.train)[1])
 
 # Strip the training dataset of extra variables
 NFLwin.train <- NFLwin.train %>% 
-   select(won.off, sprv , ptsdiff , seconds , score.lev , totalpoints,
+   dplyr::select(won.off, sprv , ptsdiff , seconds , score.lev , totalpoints,
                 yfog , dwn , ytg , timo , timd)
 
 str(NFLwin.train)
@@ -206,7 +206,7 @@ NFLwin.test$wp.Scrapr <- predict.gam(NFLwinprob.Horowitz.reg, NFLwin.test, type 
 
 ##Create a data frame for the WP accuracy plot
 plot.all <- NFLwin.test %>% 
-  select(gid, pid, wp.Scrapr, wp.Lock, won.off) %>% 
+  dplyr::select(gid, pid, wp.Scrapr, wp.Lock, won.off) %>% 
   mutate(scrapr.cat = cut_number(wp.Scrapr, 20), 
          lock.cat = cut_number(wp.Lock, 20))
 

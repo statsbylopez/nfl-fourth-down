@@ -51,7 +51,7 @@ pd <- ggplot(NFL, aes(x = ptsdiff)) +
         axis.text.y = element_blank())
 pd
 
-ggsave(file = "Figures/Point_Differential_Imbalance.png", plot = pd, height = 5, width = 6)
+#ggsave(file = "Figures/Point_Differential_Imbalance.png", plot = pd, height = 5, width = 6)
 ```
 
 
@@ -116,7 +116,7 @@ NFL.gfi %>%
 #Create the covariate matching matrix
 psm <- NFL.gfi %>% dplyr::select(pid, predict.fitms2, wp.ave, ytg, seconds)
 X <- psm[,2:5]
-X[,1:2] <- logit(X[,1:2])
+X[,1:2] <- gtools::logit(X[,1:2])
 
 match.atc <- Match(Y = NULL,
                 estimand = "ATC",
@@ -126,6 +126,8 @@ match.atc <- Match(Y = NULL,
                 X = X,
                 calip=c(0.5, 0.5, 0, .432), 
                 replace=T, Weight = 1)
+
+summary(match.atc)
 
 pairs.atc <- cbind(match.atc$index.treated, match.atc$index.control)
 dim(pairs.atc)
@@ -149,7 +151,7 @@ treated.atc$off.pair <- control.atc$off
 
 matched.subset.atc <- rbind(control.atc, treated.atc)
 
-write.csv(matched.subset.atc, file = "Data/matched.subset.atc.csv", row.names = FALSE)
+#write.csv(matched.subset.atc, file = "Data/matched.subset.atc.csv", row.names = FALSE)
 ```
 
 ```{r}
@@ -170,7 +172,7 @@ pd2 <- ggplot(matched.subset.atc, aes(x = ptsdiff)) +
         axis.text.y = element_blank())
 pd2
 
-ggsave(file = "Figures/Point_Differential_ATC.png", plot = pd2, width = 6, height = 5.5)
+#ggsave(file = "Figures/Point_Differential_ATC.png", plot = pd2, width = 6, height = 5.5)
 
 
 ```
@@ -182,12 +184,16 @@ ggsave(file = "Figures/Point_Differential_ATC.png", plot = pd2, width = 6, heigh
 ## Variables 
 vars <- c("yfog", "ytg", "time", "pointdiff", "wspd", "cond.cat", "temp", "humd", "sprv", "ou", "OR.pass", "OR.rush", "DR.pass", "DR.rush", "wk", "wp.ave", "Home")
 
+levels(NFL.gfi$cond.cat) <- c("Dome", "Dry", "Precipitation")
+
 ##Calculate the standardized bias of the Initial data
 NFL.gfi.love <- NFL.gfi[,vars]
 NFL.gfi.love <- data.frame(model.matrix(~.-1, data = NFL.gfi.love))
-NFL.gfi.love$cond.catDOME <- 1 - (NFL.gfi.love$cond.catDRY + NFL.gfi.love$cond.catPrecipitation)
+
+NFL.gfi.love$cond.catDome <- 1 - (NFL.gfi.love$cond.catDry + NFL.gfi.love$cond.catPrecipitation)
+
 NFL.gfi.love$Attempt.4 <- NFL.gfi$Attempt.4
-NFL.gfi.gather <- gather(NFL.gfi.love, "variable", "metric", yfog:cond.catDOME) 
+NFL.gfi.gather <- gather(NFL.gfi.love, "variable", "metric", yfog:cond.catDome) 
 NFL.gfi.gather <- NFL.gfi.gather %>%  
   dplyr::select(Attempt.4, variable, metric)
 
@@ -201,11 +207,17 @@ pre.match <- NFL.gfi.gather %>%
   dplyr::select(variable, bias, type)
   
 ##Calculate the standardized bias of the Matched data
+levels(matched.subset.atc$cond.cat) <- c("Dome", "Dry", "Precipitation")
+
 matched.subset.atc.love <- matched.subset.atc[,vars]
 matched.subset.atc.love <- data.frame(model.matrix(~.-1, data = matched.subset.atc.love))
-matched.subset.atc.love$cond.catDOME <- 1 - (matched.subset.atc.love$cond.catDRY + matched.subset.atc.love$cond.catPrecipitation)
+matched.subset.atc.love$cond.catDome <- 1 - (matched.subset.atc.love$cond.catDry +
+                                               matched.subset.atc.love$cond.catPrecipitation)
+
+
+
 matched.subset.atc.love$Attempt.4 <- matched.subset.atc$Attempt.4
-matched.subset.atc.gather <- gather(matched.subset.atc.love, "variable", "metric", yfog:cond.catDOME) 
+matched.subset.atc.gather <- gather(matched.subset.atc.love, "variable", "metric", yfog:cond.catDome) 
 matched.subset.atc.gather <- matched.subset.atc.gather %>%  
   dplyr::select(Attempt.4, variable, metric)
 
@@ -223,7 +235,8 @@ love.plot <- bind_rows(pre.match, post.match)
 
 ##Rename some of the variable names for the plot
 love.plot$variable <- as.character(love.plot$variable)
-love.plot$variable[love.plot$variable == "cond.catDome"] <- "condcatDry"
+love.plot$variable[love.plot$variable == "cond.catDome"] <- "condcatDome"
+love.plot$variable[love.plot$variable == "cond.catDry"] <- "condcatDry"
 love.plot$variable[love.plot$variable == "cond.catPrecipitation"] <- "condcatPrecip"
 love.plot$variable[love.plot$variable == "pointdiffpdiff.M1"] <- "pointdiff.M1"
 love.plot$variable[love.plot$variable == "pointdiffpdiff.M2"] <- "pointdiff.M2"
