@@ -69,7 +69,7 @@ pd <- ggplot(matched.subset.atc, aes(x = deltawp.off.ave)) +
   
 pd
 
-#ggsave(file = "Figures/Results_Density_Curve_ave_wp.png", plot = pd)
+ggsave(file = "Figures/Results_Density_Curve_ave_wp.png", plot = pd, height = 5.5, width = 6)
 ```
 
 ## Bootstrap for wins added per team 
