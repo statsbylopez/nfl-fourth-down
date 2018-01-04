@@ -20,6 +20,7 @@ library(splines)
 library(ggplot2)
 library(RColorBrewer)
 library(Matching)
+library(gtools)
 set.seed(100)
 ```
 
@@ -50,7 +51,7 @@ pd <- ggplot(NFL, aes(x = ptsdiff)) +
         axis.text.y = element_blank())
 pd
 
-#ggsave(file = "Figures/Point_Differential_Imbalance.png", plot = pd)
+ggsave(file = "Figures/Point_Differential_Imbalance.png", plot = pd, height = 5, width = 6)
 ```
 
 
@@ -114,15 +115,16 @@ NFL.gfi %>%
 
 #Create the covariate matching matrix
 psm <- NFL.gfi %>% dplyr::select(pid, predict.fitms2, wp.ave, ytg, seconds)
-
+X <- psm[,2:5]
+X[,1:2] <- logit(X[,1:2])
 
 match.atc <- Match(Y = NULL,
                 estimand = "ATC",
                 Tr = as.numeric(NFL.gfi$Attempt.4),
                 M = 1, 
                 ties = FALSE,
-                X = psm[,2:5],
-                calip=c(0.25, 0.25, 0, .432), 
+                X = X,
+                calip=c(0.5, 0.5, 0, .432), 
                 replace=T, Weight = 1)
 
 pairs.atc <- cbind(match.atc$index.treated, match.atc$index.control)
@@ -168,7 +170,7 @@ pd2 <- ggplot(matched.subset.atc, aes(x = ptsdiff)) +
         axis.text.y = element_blank())
 pd2
 
-#ggsave(file = "Figures/Point_Differential_ATC.png", plot = pd2)
+ggsave(file = "Figures/Point_Differential_ATC.png", plot = pd2, width = 6, height = 5.5)
 
 
 ```
@@ -182,9 +184,10 @@ vars <- c("yfog", "ytg", "time", "pointdiff", "wspd", "cond.cat", "temp", "humd"
 
 ##Calculate the standardized bias of the Initial data
 NFL.gfi.love <- NFL.gfi[,vars]
-NFL.gfi.love <- data.frame(model.matrix(~., data = NFL.gfi.love)[,-1])
+NFL.gfi.love <- data.frame(model.matrix(~.-1, data = NFL.gfi.love))
+NFL.gfi.love$cond.catDOME <- 1 - (NFL.gfi.love$cond.catDRY + NFL.gfi.love$cond.catPrecipitation)
 NFL.gfi.love$Attempt.4 <- NFL.gfi$Attempt.4
-NFL.gfi.gather <- gather(NFL.gfi.love, "variable", "metric", yfog:Home) 
+NFL.gfi.gather <- gather(NFL.gfi.love, "variable", "metric", yfog:cond.catDOME) 
 NFL.gfi.gather <- NFL.gfi.gather %>%  
   dplyr::select(Attempt.4, variable, metric)
 
@@ -199,9 +202,10 @@ pre.match <- NFL.gfi.gather %>%
   
 ##Calculate the standardized bias of the Matched data
 matched.subset.atc.love <- matched.subset.atc[,vars]
-matched.subset.atc.love <- data.frame(model.matrix(~., data = matched.subset.atc.love)[,-1])
+matched.subset.atc.love <- data.frame(model.matrix(~.-1, data = matched.subset.atc.love))
+matched.subset.atc.love$cond.catDOME <- 1 - (matched.subset.atc.love$cond.catDRY + matched.subset.atc.love$cond.catPrecipitation)
 matched.subset.atc.love$Attempt.4 <- matched.subset.atc$Attempt.4
-matched.subset.atc.gather <- gather(matched.subset.atc.love, "variable", "metric", yfog:Home) 
+matched.subset.atc.gather <- gather(matched.subset.atc.love, "variable", "metric", yfog:cond.catDOME) 
 matched.subset.atc.gather <- matched.subset.atc.gather %>%  
   dplyr::select(Attempt.4, variable, metric)
 
@@ -224,6 +228,7 @@ love.plot$variable[love.plot$variable == "cond.catPrecipitation"] <- "condcatPre
 love.plot$variable[love.plot$variable == "pointdiffpdiff.M1"] <- "pointdiff.M1"
 love.plot$variable[love.plot$variable == "pointdiffpdiff.M2"] <- "pointdiff.M2"
 love.plot$variable[love.plot$variable == "pointdiffpdiff.M3"] <- "pointdiff.M3"
+love.plot$variable[love.plot$variable == "pointdiffpdiff.M4"] <- "pointdiff.M4"
 love.plot$variable[love.plot$variable == "pointdiffpdiff.P1"] <- "pointdiff.P1"
 love.plot$variable[love.plot$variable == "pointdiffpdiff.P2"] <- "pointdiff.P2"
 love.plot$variable[love.plot$variable == "pointdiffpdiff.P3"] <- "pointdiff.P3"

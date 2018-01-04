@@ -180,6 +180,7 @@ df.out.scrapr %>%
 ```
 
 ##Combine the Lock and the scrapeR bootstrapped results
+
 ```{r}
 df.out.lock$type <- "Lock"
 df.out.scrapr$type <- "scrapR"
