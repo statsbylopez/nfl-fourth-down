@@ -1,6 +1,6 @@
 # nfl-fourth-down
 
-This repository contains RMarkdown code for a manuscript written by Michael Lopez and Derrick Yam pertaining to fourth down decision making in the National Football League. You can view a preprint of our manuscript [here]()
+This repository contains RMarkdown code for a manuscript written by Michael Lopez and Derrick Yam pertaining to fourth down decision making in the National Football League. You can view a preprint of our manuscript [here](https://statsbylopez.files.wordpress.com/2018/01/quantifying-causal-effects.pdf)
 
 There are three .rmd files provided in the `Code/` section.
 
